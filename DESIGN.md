@@ -640,8 +640,7 @@ Decided on 2026-11-07:
   [roadmap](ROADMAP.md#wanted-not-yet-scheduled).
 * **Coordinates:** the artifacts are published as `now.sendline` on Maven Central, and the repository is
   [Sendline-now/metrics4s](https://github.com/Sendline-now/metrics4s). The package stays `metrics4s`.
-* **The first published release is `0.2.0`.** `0.1.0` was prepared but never published, and its changes ship with
-  `0.2.0`, together with what the Sendline backend asked for. The default branch is `main`.
+* **The first public release is `0.2.0`.** `0.1.0` was only tested inside Sendline.now. The default branch is `main`.
 
 Decided on 2026-11-04:
 
@@ -649,5 +648,4 @@ Decided on 2026-11-04:
 * **Counter names** are written without `_total`.
 * **Enum label values** derive as the snake case of the case name; the `value` field is used only when written out.
 * **A domain product over the pre-creation limit** (512) fails registration unless the definition opts out.
-* **Versioning:** the first release is `0.1.0` (changed to `0.2.0` on 2026-11-07); MiMa and COMPATIBILITY.md checks
-  start at `1.0.0`.
+* **Versioning:** the first release is `0.1.0`; MiMa and COMPATIBILITY.md checks start at `1.0.0`.

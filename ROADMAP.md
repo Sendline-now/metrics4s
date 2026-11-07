@@ -4,9 +4,9 @@
 
 Nothing is released yet. On 2026-11-04 the first release was agreed as the core, the Prometheus backend, the four
 runtimes with their runtime metrics, the testkit and the dashboard generator. Later the same day it was widened to the
-integrations that were planned for `0.2.0` and `0.3.0`. On 2026-11-07 it became `0.2.0`: `0.1.0` was never published,
-and the release also carries what wiring the library into the Sendline backend asked for. The reasoning behind each
-module is in [DESIGN.md](DESIGN.md).
+integrations that were planned for `0.2.0` and `0.3.0`. `0.1.0` was only tested inside Sendline.now, so the first
+public release is `0.2.0`, which also carries what wiring the library into the Sendline backend asked for. The
+reasoning behind each module is in [DESIGN.md](DESIGN.md).
 
 ## 0.2.0: the first release
 

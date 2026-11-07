@@ -7,9 +7,8 @@ not covered yet is in [ROADMAP.md](ROADMAP.md).
 
 ## 0.2.0
 
-The first release published to Maven Central; `0.1.0` was never published, so its changes below ship here too. The
-rest was found while wiring the library into a service: the Sendline backend, with its dashboard generated and
-imported into Grafana.
+The first public release. It carries `0.1.0`, which was only tested inside Sendline.now, and what wiring the library
+into the Sendline backend asked for, with its dashboard generated and imported into Grafana.
 
 ### Added
 
@@ -64,7 +63,7 @@ imported into Grafana.
 
 ## 0.1.0
 
-Prepared as the first release but never published. Everything here ships with `0.2.0`.
+Not released publicly: only tested inside Sendline.now.
 
 ### Added
 
