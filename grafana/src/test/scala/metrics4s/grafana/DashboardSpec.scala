@@ -37,6 +37,8 @@ final class DashboardSpec extends AnyWordSpec, Matchers:
   private def exprs(panel: Panel): List[(String, Option[String])] =
     panel.targets.fold(error => fail(error.message), _.map(target => target.expr -> target.legend))
 
+  private def exprOf(stat: Stat): String = stat.target.fold(error => fail(error.message), _.expr)
+
   private def dashboard(sections: Section*): Dashboard =
     Dashboard("processor", "Line / processor", "line", ServiceFilter.regex("([a-z]+-)?processor.*"))(sections*)
 
@@ -224,6 +226,10 @@ final class DashboardSpec extends AnyWordSpec, Matchers:
     "read the series with _info added" in {
       dashboard(Stats(Stat.info(Definitions.build)(_.source))).reads shouldBe Set("processor_build_info")
     }
+
+    "refuse a label it does not carry, when the label is named by a string" in {
+      Stat.infoBy(Definitions.build, "stage").target shouldBe Left(GrafanaError.UnknownLabel("The build that runs", "stage", List("source")))
+    }
   }
 
   "a share stat and a quantile stat" should {
@@ -242,6 +248,40 @@ final class DashboardSpec extends AnyWordSpec, Matchers:
           s"""sum(rate(processor_items_total{$F, outcome=~"skipped|error"}[$$__rate_interval])) / sum(rate(processor_items_total{$F}[$$__rate_interval]))""",
           s"histogram_quantile(0.99, sum by (le) (rate(processor_process_seconds_bucket{$F}[$$__rate_interval])))",
         ),
+      )
+    }
+  }
+
+  "a filtered stat" should {
+    "add its matchers to the series it reads, on both sides of a share" in {
+      val queued = Gauge("processor_queued_items", "Items waiting in the queue").labelled[(source: Source)]
+
+      (
+        exprOf(Stat.rate(Definitions.processed).where(_.outcome =!= Outcome.Ok)),
+        exprOf(Stat.quantile(Definitions.processTime, 0.99).where(_.source === Source.Kafka).where(_.outcome.in(Outcome.Ok, Outcome.Skipped))),
+        exprOf(Stat.gauge(queued, Pods.Max).where(_.source === Source.Rabbit)),
+        exprOf(Stat.share(Definitions.processed)(_.outcome === Outcome.Error).where(_.source =!= Source.Rabbit)),
+        exprOf(Stat.info(Definitions.build)(_.source).where(_.source === Source.Kafka)),
+      ) shouldBe (
+        s"""sum(rate(processor_items_total{$F, outcome!="ok"}[$$__rate_interval]))""",
+        s"""histogram_quantile(0.99, sum by (le) (rate(processor_process_seconds_bucket{$F, source="kafka", outcome=~"ok|skipped"}[$$__rate_interval])))""",
+        s"""max(processor_queued_items{$F, source="rabbit"})""",
+        s"""sum(rate(processor_items_total{$F, source!="rabbit", outcome="error"}[$$__rate_interval])) / sum(rate(processor_items_total{$F, source!="rabbit"}[$$__rate_interval]))""",
+        s"""count by (source) (processor_build_info{$F, source="kafka"})""",
+      )
+    }
+
+    "keep its filters through a new title and unit, and refuse what a filtered panel refuses" in {
+      val refused = Stat.rate(Definitions.processed).titled("Refused, /s").where(_.outcome =!= Outcome.Ok).withUnit("reqps")
+
+      (
+        (exprOf(refused), refused.title, refused.unit),
+        Stat.rate(Definitions.processed).titled("Refused, /s").where(_ === ByOutcome(Outcome.Ok, Source.Kafka)).target,
+        typeCheckErrors("Stat.rate(Definitions.processed).where(_.outcome === Source.Kafka)").nonEmpty,
+      ) shouldBe (
+        (s"""sum(rate(processor_items_total{$F, outcome!="ok"}[$$__rate_interval]))""", "Refused, /s", "reqps"),
+        Left(GrafanaError.NotOneLabel("Refused, /s", List("outcome", "source"))),
+        true,
       )
     }
   }

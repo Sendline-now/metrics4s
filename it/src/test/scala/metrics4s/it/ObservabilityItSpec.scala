@@ -41,6 +41,7 @@ object ProcessorMetrics:
       Stat.gauge(cacheSize),
       Stat.quantile(processTime, 0.99),
       Stat.share(processed)(_.outcome === Outcome.Error),
+      Stat.share(processed)(_.outcome === Outcome.Error).where(_.source === Source.Kafka).titled("Kafka errors, share"),
     ),
     Row("Processing")(
       Panel.rate(processed).by(_.outcome),
@@ -203,5 +204,15 @@ final class ObservabilityItSpec extends AnyWordSpec, Matchers, BeforeAndAfterAll
       }
 
       bySource shouldBe Some(Map("kafka" -> 0.0, "rabbit" -> 1.0))
+    }
+
+    "narrow a stat to what its filter picks, none of kafka's items an error" in {
+      val kafka = panels.find(panel => panel("title").str == "Kafka errors, share").map(_("targets")(0)("expr").str)
+
+      val share = Eventually(60.seconds) {
+        kafka.map(throughGrafana).flatMap(_.headOption).map(_("value")(1).str.toDouble).filterNot(_.isNaN)
+      }
+
+      share shouldBe Some(0.0)
     }
   }

@@ -28,7 +28,7 @@ into the Sendline backend asked for, with its dashboard generated and imported i
 - `metrics4s-grafana`:
   - **typed label filters:** `.where(_.outcome =!= Outcome.Ok)`, with `===`, `.in(a, b)` and `.notIn(a, b)`, rendered
     through the label's own `LabelValue`. A value of another type, or anything but one label field compared with
-    values, does not compile;
+    values, does not compile. Panels and stats both take it;
   - **one quantile:** `Panel.quantile(histogram, 0.95)` and `Stat.quantile(histogram, 0.95)`;
   - **shares:** `Panel.share(counter)(condition)` and `Stat.share(counter)(condition)`, the matching part of the rate
     over all of it, in `percentunit`;
@@ -61,6 +61,8 @@ into the Sendline backend asked for, with its dashboard generated and imported i
 - `GrafanaError` has new cases, `NotOneLabel`, `UnknownLabelValue` and `InvalidQuantile`, so an exhaustive match on it
   now warns. The message of `UnknownLabel` no longer says "to group by", because a filter raises it too.
 - `PrometheusExporter.allocated` fails with `ExporterException` where it raised the bare `IOException`.
+- `Stat` is a sealed class. The metric stats are `MetricStat[L]`, typed by the labels `.where` filters on, and
+  `Stat.podsUp` and `Stat.custom` are a `CustomStat`. `Stat.infoBy` refuses a label the info does not carry.
 - `.gitattributes` keeps `*.json` with LF endings, so the byte-for-byte dashboard tests pass on a Windows checkout.
 
 ## 0.1.0

@@ -367,7 +367,8 @@ dashboard.writeTo(Paths.get("metrics"))
   every label, and `.byLabel("outcome")` takes the name as a string.
 * `.where(_.outcome =!= Outcome.Ok)` keeps the series whose label matches. The values are rendered through the label's
   own `LabelValue`, so a renamed case cannot silently match nothing. `===`, `=!=`, `.in(a, b)` and `.notIn(a, b)`
-  compare one label field with values of its type, and anything else does not compile.
+  compare one label field with values of its type, and anything else does not compile. Stats take the same filters:
+  `Stat.rate(processed).where(_.source === Source.Kafka)` is the rate of one source.
 * `Panel.quantile(histogram, 0.95)` draws one quantile, by any labels, where `Panel.latency` draws p50, p95 and p99.
   `Stat.quantile(histogram, 0.95)` is the stat, and `Stat.p95` its shorthand.
 * `Panel.share(counter)(_.result === CacheResult.Hit)` and `Stat.share(counter)(...)` draw the share of the counter's
