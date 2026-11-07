@@ -1,6 +1,7 @@
 package metrics4s.testkit
 
 import java.net.URI
+import java.net.{BindException, ServerSocket}
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 
 import scala.jdk.CollectionConverters.*
@@ -12,7 +13,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import io.prometheus.metrics.model.snapshots.Unit as PrometheusUnit
 
 import metrics4s.*
-import metrics4s.prometheus.{PrometheusBackend, PrometheusExporter, PrometheusMetrics}
+import metrics4s.prometheus.{ExporterException, PrometheusBackend, PrometheusExporter, PrometheusMetrics}
 
 import scala.concurrent.duration.given
 import metrics4s.Eval.given
@@ -198,6 +199,21 @@ final class PrometheusBackendSpec extends AnyWordSpec, Matchers:
         Eval.run(PrometheusExporter.allocated[Eval](0, testkit.registry).use(exporter => summon[Effect[Eval]].delay((exporter.port, scrape(exporter.port)))))
 
       (served.map(_.contains("processor_received_total 0.0")), scrape(port).isFailure) shouldBe (Try(true), true)
+    }
+
+    "fail with the port it cannot listen on, the bind failure kept as the cause" in {
+      val taken = ServerSocket(0)
+      val port  = taken.getLocalPort
+
+      val refused =
+        try Eval.attempt(PrometheusExporter.allocated[Eval](port, MetricsTestkit().registry).use(_ => summon[Effect[Eval]].unit))
+        finally taken.close()
+
+      val named = refused.left.toOption.collect { case error: ExporterException =>
+        (error.port, error.getMessage.startsWith(s"The Prometheus exporter cannot listen on port $port: "), error.getCause.isInstanceOf[BindException])
+      }
+
+      named shouldBe Some((port, true, true))
     }
   }
 
