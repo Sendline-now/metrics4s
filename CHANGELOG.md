@@ -7,10 +7,34 @@ not covered yet is in [ROADMAP.md](ROADMAP.md).
 
 ## 0.2.0
 
-Found while wiring the library into a service: the Sendline backend, with its dashboard generated and imported into
-Grafana.
+The first release published to Maven Central; `0.1.0` was never published, so its changes below ship here too. The
+rest was found while wiring the library into a service: the Sendline backend, with its dashboard generated and
+imported into Grafana.
 
 ### Added
+
+- **`Measured`: an operation timed and counted by outcome in one call.** `Measured(histogram, counter, failed)(labels)`
+  gives `measure(labels)(fa)(outcome)`. The outcome is read from the value, and an error counts as `failed` and is
+  re-raised as the same instance. A cancellation records nothing. When recording fails as well, the operation's error
+  is still the one raised, with the recording failure suppressed in it.
+- **`registerAs[P]`** registers a named tuple of definitions into a case class. The names must be its fields in their
+  order, and the instruments must fit their types, or the call does not compile. Two instruments of the same type can
+  no longer swap places unnoticed, as they could in a tuple.
+- **`ExporterException`.** `PrometheusExporter.allocated` names the port it cannot listen on, in the message and as
+  `port`, with the bind failure as the cause.
+- **The integrations' definitions without an instance.** `HttpServerMetrics.requests`, `.duration`, `.inFlight` and
+  `.definitions`, the same on `HttpClientMetrics`, and `MongoMetrics.commands`, `.failures`, `.connections`,
+  `.checkOut`, `.checkOutFailures` and `.definitions`. A dashboard draws from them without the route or collection
+  list. An instance still defines the same series, with its values pre-created.
+- `metrics4s-grafana`:
+  - **typed label filters:** `.where(_.outcome =!= Outcome.Ok)`, with `===`, `.in(a, b)` and `.notIn(a, b)`, rendered
+    through the label's own `LabelValue`. A value of another type, or anything but one label field compared with
+    values, does not compile;
+  - **one quantile:** `Panel.quantile(histogram, 0.95)` and `Stat.quantile(histogram, 0.95)`;
+  - **shares:** `Panel.share(counter)(condition)` and `Stat.share(counter)(condition)`, the matching part of the rate
+    over all of it, in `percentunit`;
+  - **the drift check:** `dashboard.missingSeries(definitions)` lists the series the dashboard's own panels and stats
+    read that no definition serves. `dashboard.reads` is every series it reads.
 
 - **Info metrics.** `Info("name", "help").labelled[L]` is a constant series `name_info = 1` whose labels carry the
   facts: the build's version, the stage, a configuration. `register` gives an `InfoOf[F, L]`, whose `set(labels)`
@@ -33,11 +57,14 @@ Grafana.
 ### Changed
 
 - `MetricKind` has a new case, `Info`. A match on it in user code that was exhaustive now warns.
+- `GrafanaError` has new cases, `NotOneLabel`, `UnknownLabelValue` and `InvalidQuantile`, so an exhaustive match on it
+  now warns. The message of `UnknownLabel` no longer says "to group by", because a filter raises it too.
+- `PrometheusExporter.allocated` fails with `ExporterException` where it raised the bare `IOException`.
 - `.gitattributes` keeps `*.json` with LF endings, so the byte-for-byte dashboard tests pass on a Windows checkout.
 
 ## 0.1.0
 
-The first release.
+Prepared as the first release but never published. Everything here ships with `0.2.0`.
 
 ### Added
 

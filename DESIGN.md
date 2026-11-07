@@ -23,6 +23,7 @@ failures are here too. What was decided and when is in [Decisions](#decisions).
 * [Runtimes live under metrics4s.runtime](#runtimes-live-under-metrics4sruntime)
 * [Callbacks are read at scrape time](#callbacks-are-read-at-scrape-time)
 * [Timing an effect](#timing-an-effect)
+* [Measuring an operation](#measuring-an-operation)
 * [A gauge forgets what is gone](#a-gauge-forgets-what-is-gone)
 * [The Prometheus backend](#the-prometheus-backend)
 * [Runtime metrics](#runtime-metrics)
@@ -152,6 +153,12 @@ object ProcessorMetrics:
 `registerAll` takes a tuple of definitions and returns a tuple of instruments, typed by a match type over the
 definition types. It is all or nothing: if the third registration fails, the first two are unregistered before the
 error is raised. This is the rollback commons' runtime metrics did by hand.
+
+A tuple of eleven instruments is then unpacked into a class by position, where two counters of the same type can swap
+places and still compile. `registerAs[P]` takes a named tuple of definitions instead and fills the case class `P`. An
+inline check compares the tuple's names with the fields, in order, and the instrument types with the field types, so
+both mistakes are compile errors with a sentence that says what to change. The registration underneath is
+`registerAll`, rollback included.
 
 A failure is a `MetricError`, a sealed ADT: name taken, conflicting descriptor, invalid label name, duplicate label
 value, domain too large. It is raised in `F` as a `MetricException`, never thrown to the caller.
@@ -404,6 +411,27 @@ A success and an error are recorded. A cancellation is not, because its duration
 not the time the work takes. `timedBy` picks the labels from the outcome, which lets errors share a histogram with
 successes under `outcome="error"`. The effect is taken by name, so nothing in it runs before the clock is read.
 
+## Measuring an operation
+
+```scala
+val fetch = Measured(fetchTime, fetches, FetchOutcome.Failed)((labels, outcome) => (source = labels.source, outcome = outcome))
+
+fetch.measure((source = Source.Kafka))(repository.find(id))(found => if found.isDefined then FetchOutcome.Found else FetchOutcome.Missing)
+```
+
+A service that measures its operations writes the same thing for each of them: time it, count it by outcome, where the
+outcome comes from the value or is "failed" on an error, and re-raise the error. Written by hand, it is the code most
+likely to lie. A wrapper that turns an exception into a value makes the metric wrong in exactly the case it exists
+for. `Measured` writes it once:
+
+* The error is the same instance, re-raised after the recording. If recording fails too, the operation's error still
+  wins, and the recording failure is added to it as suppressed.
+* The outcome function runs inside `F`, so an exception in it is an error of the effect, not a throw while the effect
+  is built.
+* A cancellation records nothing, for the reason `timed` does not.
+* The histogram keeps the operation's labels, and the counter adds the outcome. A histogram split by outcome would
+  multiply its buckets for a distinction the counter already makes.
+
 ## A gauge forgets what is gone
 
 A labelled gauge keeps the last value of a series that is no longer updated: a provider that went away stays on the
@@ -487,6 +515,16 @@ values), so `metrics4s-grafana` builds the JSON from them.
   A custom panel that breaks a rule makes `render` return a `GrafanaError`.
 * **`by(_.outcome)` is a selector macro**, so a label field that does not exist does not compile. `byAll` and `byLabel`
   cover single labels, whose name the type does not carry.
+* **Filters are typed the same way.** `.where(_.outcome =!= Outcome.Ok)` is read by a macro that accepts one label field
+  compared with values of its type, and the values are rendered through the label's `LabelValue`. A filter typed as a
+  string had to guess that `BadCredentials` renders as `bad_credentials`, and matched nothing once the case was
+  renamed. A value outside an enumerated domain fails `render`.
+* **One quantile and shares are panels of their own**, because services kept writing them as custom queries:
+  `Panel.quantile(h, 0.95)` instead of three lines per label value, and `Panel.share(counter)(condition)` for a hit or
+  error ratio.
+* **`dashboard.missingSeries(definitions)`** is the drift check without a registry: the series the dashboard's own
+  panels and stats read, minus the ones the definitions serve. The shared rows are left out of it, since the library
+  checks them against the runtime metrics and the integrations' definitions.
 * **The shared rows ship with the library:** cats-effect, ZIO, Kyo, the JVM, HTTP server, HTTP client and MongoDB. The
   cats-effect and JVM rows query exactly what the hand-written merger and descriptions dashboards query, and a spec
   pins this. The legacy `or jvm_memory_bytes_used` fallbacks for pre-commons-4 releases are left out.
@@ -514,6 +552,10 @@ All HTTP integrations share `metrics4s-http`, so one dashboard row fits whicheve
   methods × statuses would have to be pre-created.
 * **`status` is a class, not a code.** That keeps the domain small enough to pre-create. A service that needs 404 apart
   from 400 has the route to tell them apart.
+* **The definitions live on the companions as well.** `HttpServerMetrics.requests` is defined with a bounded route,
+  and an instance relabels it with its enumerated routes, so both describe the same series. A dashboard needs the
+  names, not the values, and draws from the companion without the route list. `MongoMetrics` does the same with its
+  collections.
 * **http4s** gets server middleware with a classifier from the request to a template, and client middleware with a
   classifier into operations.
 * **tapir** takes the templates from the endpoints themselves (`TapirMetrics.template`). A request no endpoint matched
@@ -598,6 +640,8 @@ Decided on 2026-11-07:
   [roadmap](ROADMAP.md#wanted-not-yet-scheduled).
 * **Coordinates:** the artifacts are published as `now.sendline` on Maven Central, and the repository is
   [Sendline-now/metrics4s](https://github.com/Sendline-now/metrics4s). The package stays `metrics4s`.
+* **The first published release is `0.2.0`.** `0.1.0` was prepared but never published, and its changes ship with
+  `0.2.0`, together with what the Sendline backend asked for. The default branch is `main`.
 
 Decided on 2026-11-04:
 
@@ -605,4 +649,5 @@ Decided on 2026-11-04:
 * **Counter names** are written without `_total`.
 * **Enum label values** derive as the snake case of the case name; the `value` field is used only when written out.
 * **A domain product over the pre-creation limit** (512) fails registration unless the definition opts out.
-* **Versioning:** the first release is `0.1.0`; MiMa and COMPATIBILITY.md checks start at `1.0.0`.
+* **Versioning:** the first release is `0.1.0` (changed to `0.2.0` on 2026-11-07); MiMa and COMPATIBILITY.md checks
+  start at `1.0.0`.

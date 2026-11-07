@@ -4,9 +4,11 @@
 
 Nothing is released yet. On 2026-11-04 the first release was agreed as the core, the Prometheus backend, the four
 runtimes with their runtime metrics, the testkit and the dashboard generator. Later the same day it was widened to the
-integrations that were planned for `0.2.0` and `0.3.0`. The reasoning behind each module is in [DESIGN.md](DESIGN.md).
+integrations that were planned for `0.2.0` and `0.3.0`. On 2026-11-07 it became `0.2.0`: `0.1.0` was never published,
+and the release also carries what wiring the library into the Sendline backend asked for. The reasoning behind each
+module is in [DESIGN.md](DESIGN.md).
 
-## 0.1.0: the first release
+## 0.2.0: the first release
 
 | Module | State |
 | --- | --- |
@@ -17,11 +19,13 @@ integrations that were planned for `0.2.0` and `0.3.0`. The reasoning behind eac
 | `testkit` | done |
 | `grafana`: dashboards and README tables | done |
 | `http`, `http4s`, `tapir`, `sttp`, `mongo` | done |
+| From the Sendline backend: info metrics, `Measured`, `registerAs`, the exporter's port in its error, the integrations' definitions on their companions | done |
+| From the Sendline backend, in `grafana`: typed filters, one quantile, shares, `missingSeries(definitions)` | done |
 
 **Done means**, and where each item stands:
 
 * Every module has specs that check real values read from a real registry, not only that a series exists. **Done:**
-  139 tests, plus 6 integration tests.
+  165 tests, plus 7 integration tests.
 * The four `Effect` instances pass one shared `EffectSuite`. **Done.**
 * The runtime metrics export exactly the names, types and labels commons exports, and a spec compares them. **Done.**
 * The shared dashboard rows read only series the runtime metrics and the JVM export. **Done**, checked by
@@ -35,7 +39,7 @@ integrations that were planned for `0.2.0` and `0.3.0`. The reasoning behind eac
   own rows need their metric definitions, which belong in those services once they move to `metrics4s`.
 * The coordinates are settled and the first release is published. **Partly done.** The artifacts are `now.sendline`
   and the repository is [Sendline-now/metrics4s](https://github.com/Sendline-now/metrics4s), decided on 2026-11-07.
-  Nothing is published yet.
+  Nothing is published yet; the first release is `0.2.0`.
 
 ## Wanted, not yet scheduled
 

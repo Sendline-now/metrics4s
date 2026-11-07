@@ -39,6 +39,7 @@ flowchart LR
 ```
 
 * [Quick start](#quick-start)
+* [Running it in a service](#running-it-in-a-service)
 * [Defining metrics](#defining-metrics)
 * [Recording](#recording)
 * [Reading at scrape time](#reading-at-scrape-time)
@@ -57,10 +58,10 @@ flowchart LR
 
 ```scala
 libraryDependencies ++= Seq(
-  "now.sendline" %% "metrics4s-cats"       % "0.1.0", // core + cats-effect, with its runtime metrics
-  "now.sendline" %% "metrics4s-prometheus" % "0.1.0", // the backend, the exporter and JVM metrics
-  "now.sendline" %% "metrics4s-grafana"    % "0.1.0", // dashboards and README tables from the definitions
-  "now.sendline" %% "metrics4s-testkit"    % "0.1.0" % Test,
+  "now.sendline" %% "metrics4s-cats"       % "0.2.0", // core + cats-effect, with its runtime metrics
+  "now.sendline" %% "metrics4s-prometheus" % "0.2.0", // the backend, the exporter and JVM metrics
+  "now.sendline" %% "metrics4s-grafana"    % "0.2.0", // dashboards and README tables from the definitions
+  "now.sendline" %% "metrics4s-testkit"    % "0.2.0" % Test,
 )
 ```
 
@@ -120,6 +121,20 @@ series, the cats-effect runtime and the JVM.
 
 Swap `metrics4s-cats` for `metrics4s-zio`, `-kyo` or `-rapid` and the matching `*Instances.given` import to change
 runtime. The definitions and the calls stay the same.
+
+## Running it in a service
+
+Three things the compiler cannot check:
+
+- **Give every copy of the app its own registry.** `PrometheusRegistry.defaultRegistry` is global to the JVM, so when
+  a test run starts the app twice, the second copy finds its names taken and fails to register. Create a
+  `PrometheusRegistry()` and hand the same one to the exporter.
+- **Serve the metrics on a port of their own.** `PrometheusExporter.allocated(9464, registry)` listens apart from the
+  API, so `/metrics` never goes out through the public ingress. A port that is taken fails with an `ExporterException`
+  that names it.
+- **Label only from closed sets:** an enum, a list known at startup (`LabelValue.enumerated`), or
+  `LabelValue.bounded` for a value the deployment fixes, such as the build's version in an `Info`. A user id, a path
+  or an error message adds a series for every value it ever takes.
 
 ## Defining metrics
 
@@ -196,6 +211,30 @@ counter.unsafe.inc(Outcome.Ok)             // Unit, for code outside F: driver l
 counter.unregister
 ```
 
+`registerAs` registers a named tuple of definitions into a case class, so the instruments travel by name, not by
+position. Each name must be a field of the class, in its order, and each field must have the type of the instrument
+its definition registers as. Anything else does not compile:
+
+```scala
+final case class Processing(processed: CounterOf[IO, Long, Outcome], processTime: HistogramOf[IO, FiniteDuration, NoLabels])
+
+Metrics[IO].registerAs[Processing]((processed = ProcessorMetrics.processed, processTime = ProcessorMetrics.processTime))
+```
+
+`Measured` times an operation and counts it by outcome in one call, the RED pattern. The histogram carries the
+operation's labels, the counter carries those labels and the outcome, and the last argument builds the counter's
+labels from both:
+
+```scala
+val fetch = Measured(fetchTime, fetches, FetchOutcome.Failed)((labels, outcome) => (source = labels.source, outcome = outcome))
+
+fetch.measure((source = Source.Kafka))(repository.find(id))(found => if found.isDefined then FetchOutcome.Found else FetchOutcome.Missing)
+```
+
+The outcome of a value comes from the function. An error is counted as `Failed` and re-raised as it was, the same
+instance, so the metric cannot turn a failure into a value. A cancellation records nothing. If the recording itself
+fails while the operation failed, the operation's error is still the one raised, with the other suppressed in it.
+
 An **info** carries facts rather than a number: the build's version, the stage, a configuration. Its series is always
 `1`, and its labels are what the dashboard shows. `set` replaces the previous labels, so a copy shows one series:
 
@@ -270,6 +309,9 @@ PrometheusScrape.text(registry)                                  // the expositi
 The registry is passed, never assumed. `PrometheusRegistry.defaultRegistry` is the one other Java libraries register
 on, so services often want it. When they do, they write it out.
 
+When the exporter cannot listen on its port, `allocated` fails with an `ExporterException`: its message and its `port`
+name the port, and the bind failure is its cause.
+
 ## Testing
 
 Tests read real values from a real registry:
@@ -321,6 +363,16 @@ dashboard.writeTo(Paths.get("metrics"))
   A custom query that breaks one of these rules fails `render`.
 * `.by(_.outcome)` groups by a label field and does not compile for a field that does not exist. `.byAll` groups by
   every label, and `.byLabel("outcome")` takes the name as a string.
+* `.where(_.outcome =!= Outcome.Ok)` keeps the series whose label matches. The values are rendered through the label's
+  own `LabelValue`, so a renamed case cannot silently match nothing. `===`, `=!=`, `.in(a, b)` and `.notIn(a, b)`
+  compare one label field with values of its type, and anything else does not compile.
+* `Panel.quantile(histogram, 0.95)` draws one quantile, by any labels, where `Panel.latency` draws p50, p95 and p99.
+  `Stat.quantile(histogram, 0.95)` is the stat, and `Stat.p95` its shorthand.
+* `Panel.share(counter)(_.result === CacheResult.Hit)` and `Stat.share(counter)(...)` draw the share of the counter's
+  rate that matches, in `percentunit`.
+* `dashboard.missingSeries(definitions)` lists the series the dashboard's own panels and stats read that none of the
+  definitions serves, such as a panel left behind by a renamed metric. One line in a test gives every service the
+  check. The shared rows are left out: the library checks them against its own definitions.
 * `Rows.catsEffect`, `Rows.zio`, `Rows.kyo`, `Rows.jvm`, `Rows.httpServer`, `Rows.httpClient` and `Rows.mongo` are the
   shared rows. The cats-effect and JVM rows query exactly what the hand-written merger and descriptions dashboards
   query.
@@ -350,6 +402,20 @@ SttpMetrics.register[IO](List("get-user")).map(recorder => SttpMetrics.wrap(back
 
 // MongoDB driver, and mongo4s through MongoClientResource.fromSettings
 MongoMetrics(List("users", "events")).register[IO].map(listeners => listeners.applyTo(MongoClientSettings.builder()).build())
+```
+
+The same definitions are on the companions, with no routes or collections: `HttpServerMetrics.requests`, `.duration`
+and `.inFlight`, the same three on `HttpClientMetrics`, the five of `MongoMetrics`, and `definitions` on each. A
+dashboard needs the label names, not the values, so it draws from them without the service's route list:
+
+```scala
+Stats(
+  Stat.rate(HttpServerMetrics.requests),
+  Stat.quantile(HttpServerMetrics.duration, 0.95),
+  Stat.share(HttpServerMetrics.requests)(_.status.in(StatusClass.ServerError, StatusClass.Failed)),
+)
+
+dashboard.missingSeries(List(ProcessorMetrics.processed, ProcessorMetrics.processTime) ++ HttpServerMetrics.definitions)
 ```
 
 | Module | Metrics |
@@ -389,8 +455,6 @@ MongoMetrics(List("users", "events")).register[IO].map(listeners => listeners.ap
 
 How to build, test and release the project is in [CONTRIBUTING.md](CONTRIBUTING.md); security reports go through
 [SECURITY.md](SECURITY.md), and the [code of conduct](CODE_OF_CONDUCT.md) applies everywhere.
-
-![Contributors](CONTRIBUTORS.svg)
 
 ## License
 
