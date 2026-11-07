@@ -13,6 +13,7 @@ and `core` depends on nothing.
 
 [![CI](https://github.com/sendline-now/metrics4s/actions/workflows/ci.yml/badge.svg)](https://github.com/sendline-now/metrics4s/actions/workflows/ci.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/now.sendline/metrics4s-core_3?color=blue)](https://central.sonatype.com/search?q=g:now.sendline%20metrics4s)
+[![Docs](https://img.shields.io/badge/docs-oss.sendline.now-blue)](https://oss.sendline.now/metrics4s/)
 [![Scala 3](https://img.shields.io/badge/Scala-3-blue)](https://www.scala-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
