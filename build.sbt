@@ -242,7 +242,12 @@ lazy val it = project
       .map("DOCKER_HOST" -> _)
       .orElse(Option.when(scala.util.Properties.isWin)("DOCKER_HOST" -> "tcp://localhost:2375"))
       .toMap,
-    libraryDependencies ++= Dependencies.IntegrationTesting.all,
+    Test / javaOptions ++= Seq(
+      s"-Dmetrics4s.version=${version.value}",
+      s"-Dmetrics4s.root=${(ThisBuild / baseDirectory).value}",
+      s"-Dmetrics4s.examples=${(Test / scalaSource).value / "metrics4s" / "it" / "docs"}",
+    ),
+    libraryDependencies ++= Dependencies.IntegrationTesting.all :+ Dependencies.Tapir.http4sServer,
   )
   .dependsOn(core, prometheus, cats, zio, kyo, rapid, testkit, grafana, http, http4s, tapir, sttp, mongo)
 

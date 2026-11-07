@@ -203,11 +203,11 @@ raised in `F`.
 counter.inc(Outcome.Ok)                    // F[Unit]
 counter.add(Outcome.Skipped, 5)
 total.inc()                                // a metric without labels
-gauge.set(42)
+gauge.set(Outcome.Ok, 42)
 inFlight.inc(Outcome.Ok); inFlight.dec(Outcome.Ok)
 gauge.replace(Map(Outcome.Ok -> 3))        // the rest goes to 0, or is removed when the label is bounded
-histogram.observe(250.millis)
-histogram.timed(fa)                        // a success and a failure are recorded, a cancellation is not
+histogram.observe(Outcome.Ok, 250.millis)
+histogram.timed(Outcome.Ok)(fa)            // a success and a failure are recorded, a cancellation is not
 histogram.timedBy(fa)(result => if result.isRight then Outcome.Ok else Outcome.Error)
 counter.unsafe.inc(Outcome.Ok)             // Unit, for code outside F: driver listeners, interceptors
 counter.unregister

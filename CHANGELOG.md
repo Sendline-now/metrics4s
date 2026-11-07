@@ -54,6 +54,8 @@ into the Sendline backend asked for, with its dashboard generated and imported i
   response callback and the exception callback for such a request. It was counted once as its status and once as
   `failed`, and `http_server_in_flight` went below zero. A request now finishes once, whichever callback comes
   first.
+- **The README's recording example did not compile.** It set a labelled gauge and observed a labelled histogram
+  without labels. Every Scala block in the README is now copied from an example the integration tests compile.
 
 ### Changed
 

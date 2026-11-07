@@ -55,7 +55,7 @@ builds and tests exactly the same; the build only adds the credentials when the 
 | `grafana` | dashboards and README tables generated from the definitions |
 | `integrations/http` | the HTTP server and client metrics shared by `integrations/http4s`, `integrations/tapir` and `integrations/sttp` |
 | `integrations/mongo` | command and pool listeners for the MongoDB driver |
-| `it` | Prometheus, Grafana and MongoDB in Docker via [Testcontainers](https://testcontainers.com/), and the README quick start |
+| `it` | Prometheus, Grafana and MongoDB in Docker via [Testcontainers](https://testcontainers.com/), and the README's examples, compiled |
 | `benchmarks` | JMH benchmarks of the hot path against the raw Prometheus client |
 
 ## Adding a runtime
@@ -95,6 +95,10 @@ through the instruments' `unsafe` side, so they need no effect. Add a dashboard 
   dashboard into Grafana and runs every panel's queries through Grafana's datasource proxy. On Windows the forks point
   Testcontainers at `tcp://localhost:2375`, so enable Docker Desktop's "Expose daemon on tcp://localhost:2375 without
   TLS", or set `DOCKER_HOST` yourself.
+- Every Scala block in [README.md](README.md) is copied from an example under `it/src/test/scala/metrics4s/it/docs`,
+  which the `it` module compiles with the same warnings as the library. `DocsItSpec` fails on a block that matches no
+  example, whitespace aside, and on a dependency line whose version is not the one `build.sbt` publishes. Change the
+  example and the block together.
 - Numbers in [BENCHMARKS.md](BENCHMARKS.md) come from `sbt "benchmarks/Jmh/run"`; rerun it when the hot path changes.
 
 ## Code style

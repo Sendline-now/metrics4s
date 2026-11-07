@@ -1,4 +1,4 @@
-package metrics4s.it.quickstart
+package metrics4s.it.docs.quickstart
 
 import scala.concurrent.duration.FiniteDuration
 

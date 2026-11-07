@@ -601,7 +601,8 @@ inline constructor that reaches them made the compiler synthesise an unstable ac
 `mongo4s` caught an `ArrowAssoc` deprecation that broke its users. It holds:
 
 - the Docker integration tests (Prometheus, Grafana, MongoDB through Testcontainers);
-- the README's quick start, so the README cannot drift from what compiles.
+- an example for every Scala block of the README, which `DocsItSpec` matches against the README, so a block cannot
+  drift from what compiles.
 
 Two things to know when working on it:
 
