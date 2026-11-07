@@ -1,5 +1,7 @@
 package metrics4s.tapir
 
+import java.util.concurrent.atomic.AtomicBoolean
+
 import sttp.monad.MonadError
 import sttp.tapir.AnyEndpoint
 import sttp.tapir.server.interceptor.metrics.MetricsRequestInterceptor
@@ -29,7 +31,9 @@ object TapirMetrics:
     s"${endpoint.method.fold("ANY")(_.method)} ${endpoint.showPathTemplate(showQueryParam = None)}"
 
   private def endpointMetric[F[*]](recorder: HttpServerRecorder, started: Long, monad: MonadError[F]): EndpointMetric[F] =
-    def finish(route: Route, status: StatusClass): F[Unit] = monad.eval(recorder.finish(started, route, status))
+    val finished = AtomicBoolean(false)
+
+    def finish(route: Route, status: StatusClass): F[Unit] = monad.eval(if finished.compareAndSet(false, true) then recorder.finish(started, route, status))
 
     EndpointMetric[F]()
       .onResponseHeaders((endpoint, response) => finish(recorder.metrics.route(Some(template(endpoint))), StatusClass.of(response.code.code)))
