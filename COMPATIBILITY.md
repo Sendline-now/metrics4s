@@ -18,7 +18,8 @@
 | | Version |
 | --- | --- |
 | Scala | `3.9.0` (built on the LTS); the `it` module compiles on `3.10.0` against it |
-| JDK | 25 or newer, checked when the build loads (Kyo ships Java 25 class files) |
+| JDK, to run | 17 or newer: every module is compiled to Java 17 class files. `metrics4s-rapid` needs 21, because rapid runs on virtual threads, and `metrics4s-kyo` needs 25, because Kyo ships Java 25 class files |
+| JDK, to build | 25 or newer, checked when the build loads |
 | Prometheus Java client | `1.10.0` |
 | cats-effect | `3.7.1` |
 | ZIO | `2.1.27` |

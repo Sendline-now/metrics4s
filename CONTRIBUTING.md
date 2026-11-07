@@ -13,6 +13,10 @@ version it found, instead of letting most modules compile and `metrics4s-kyo` fa
 the whole build follows the module with the highest floor. `cs java --jvm 25` or `brew install openjdk@25` gets you
 one; CI uses the same.
 
+What the build produces runs on JDK 17: `-java-output-version 17` writes Java 17 class files and refuses any JDK API
+newer than 17, and `JavaVersionItSpec` checks a class of every published module. Only `metrics4s-rapid` (21) and
+`metrics4s-kyo` (25) need more, because the libraries they wrap do.
+
 Every published module compiles on `Versions.scala3` (`3.9`, the LTS) in `project/Dependencies.scala`. `it` is the
 exception on purpose: it compiles on `Versions.scala3Next` (`3.10`) against the library compiled by `3.9`. The name,
 help and bucket checks are inline macros that expand in the caller, so what a user on a newer compiler sees is only

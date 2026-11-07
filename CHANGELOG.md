@@ -55,6 +55,8 @@ into the Sendline backend asked for, with its dashboard generated and imported i
 
 ### Changed
 
+- Every module is compiled to Java 17 class files against the JDK 17 API, so it runs on JDK 17. `metrics4s-rapid`
+  needs 21 and `metrics4s-kyo` needs 25, like rapid and Kyo themselves. Only the build needs JDK 25.
 - `MetricKind` has a new case, `Info`. A match on it in user code that was exhaustive now warns.
 - `GrafanaError` has new cases, `NotOneLabel`, `UnknownLabelValue` and `InvalidQuantile`, so an exhaustive match on it
   now warns. The message of `UnknownLabel` no longer says "to group by", because a filter raises it too.

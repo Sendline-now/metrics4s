@@ -62,6 +62,8 @@ lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
     "-encoding",
     "UTF-8",
+    "-java-output-version",
+    "17",
     s"-source:${sourceLevel.value}",
     "-deprecation",
     "-feature",

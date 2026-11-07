@@ -56,6 +56,8 @@ flowchart LR
 
 ## Quick start
 
+Runs on JDK 17 or newer. `metrics4s-rapid` needs 21 and `metrics4s-kyo` needs 25, like the libraries they wrap.
+
 ```scala
 libraryDependencies ++= Seq(
   "now.sendline" %% "metrics4s-cats"       % "0.2.0", // core + cats-effect, with its runtime metrics
