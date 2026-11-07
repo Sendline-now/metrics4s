@@ -5,7 +5,7 @@ object Rows:
 
   private def rateByPod(series: String): String = s"sum by (pod) (${Query.rate(series)})"
 
-  val catsEffect: Row = Row("Cats Effect runtime")(
+  val catsEffect: Row = Row.shared("Cats Effect runtime")(
     Panel.custom("CPU starvation, /s", "ops", "`cats_effect_cpu_starvation_total`: clock drifts above the starvation threshold. Should stay at zero.")(
       Target(rateByPod("cats_effect_cpu_starvation_total"), "{{pod}}", Set("cats_effect_cpu_starvation_total"))
     ),
@@ -38,7 +38,7 @@ object Rows:
     ),
   )
 
-  val zio: Row = Row("ZIO runtime")(
+  val zio: Row = Row.shared("ZIO runtime")(
     Panel.custom("Executor workers", "short", "`zio_executor_workers{executor}`: active worker threads of the default and the blocking executor.")(
       Target(s"sum by (pod, executor) (${Query.selector("zio_executor_workers")})", "{{pod}} {{executor}}", Set("zio_executor_workers"))
     ),
@@ -53,7 +53,7 @@ object Rows:
     ),
   )
 
-  val kyo: Row = Row("Kyo runtime")(
+  val kyo: Row = Row.shared("Kyo runtime")(
     Panel.custom("Workers", "short", "`kyo_scheduler_workers`, `_blocked`, `_stalled`: workers the regulator lets run, and the ones stuck in a task.")(
       Target(byPod("kyo_scheduler_workers"), "{{pod}} workers", Set("kyo_scheduler_workers")),
       Target(byPod("kyo_scheduler_workers_blocked"), "{{pod}} blocked", Set("kyo_scheduler_workers_blocked")),
@@ -78,7 +78,7 @@ object Rows:
     ),
   )
 
-  val jvm: Row = Row("JVM")(
+  val jvm: Row = Row.shared("JVM")(
     Panel.custom("Heap", "bytes", "`jvm_memory_used_bytes`, `jvm_memory_max_bytes` with `area=\"heap\"`.")(
       Target(byPod("jvm_memory_used_bytes", """area="heap""""), "{{pod}} used", Set("jvm_memory_used_bytes")),
       Target(byPod("jvm_memory_max_bytes", """area="heap""""), "{{pod}} max", Set("jvm_memory_max_bytes")),
@@ -102,7 +102,7 @@ object Rows:
     ),
   )
 
-  val httpServer: Row = Row("HTTP server")(
+  val httpServer: Row = Row.shared("HTTP server")(
     Panel.custom("Requests by route and status, /s", "reqps", "`http_server_requests_total{route, status}`: handled requests, `route` being the template.")(
       Target(s"sum by (route, status) (${Query.rate("http_server_requests_total")})", "{{route}} {{status}}", Set("http_server_requests_total"))
     ),
@@ -121,7 +121,7 @@ object Rows:
     ),
   )
 
-  val httpClient: Row = Row("HTTP client")(
+  val httpClient: Row = Row.shared("HTTP client")(
     Panel.custom(
       "Requests by operation and status, /s",
       "reqps",
@@ -137,7 +137,7 @@ object Rows:
     ),
   )
 
-  val mongo: Row = Row("MongoDB")(
+  val mongo: Row = Row.shared("MongoDB")(
     Panel.custom("Commands by command and collection, /s", "ops", "`mongo_command_seconds_count{command, collection}`: commands sent to the server.")(
       Target(s"sum by (command, collection) (${Query.rate("mongo_command_seconds_count")})", "{{command}} {{collection}}", Set("mongo_command_seconds_count"))
     ),

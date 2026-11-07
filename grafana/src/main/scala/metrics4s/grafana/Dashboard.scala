@@ -5,6 +5,8 @@ import java.nio.file.{Files, Path}
 
 import scala.util.Try
 
+import metrics4s.MetricDef
+
 final class ServiceFilter private (val regex: String)
 
 object ServiceFilter:
@@ -25,6 +27,12 @@ final class Dashboard private (
   def render: Either[GrafanaError, String] = json.map(_.render + "\n")
 
   def reads: Set[String] = Dashboard.readsOf(sections)
+
+  def missingSeries(definitions: Iterable[MetricDef]): Set[String] =
+    Dashboard.readsOf(sections.filter {
+      case row: Row => !row.shared
+      case _        => true
+    }) -- definitions.flatMap(seriesOf)
 
   def writeTo(directory: Path): Either[Throwable, Path] =
     for

@@ -332,6 +332,23 @@ final class DashboardSpec extends AnyWordSpec, Matchers:
       )
     }
 
+    "name what its own panels read that no definition serves, and leave the shared rows to the library" in {
+      val board = dashboard(
+        Stats(Stat.podsUp, Stat.rate(Definitions.received), Stat.info(Definitions.build)(_.source)),
+        Row("Processing")(Panel.rate(Definitions.processed), Panel.latency(Definitions.processTime)),
+        Rows.jvm,
+        Rows.catsEffect,
+      )
+
+      (
+        board.missingSeries(List(Definitions.processed)),
+        board.missingSeries(List(Definitions.processed, Definitions.received, Definitions.processTime, Definitions.build)),
+      ) shouldBe (
+        Set("processor_received_total", "processor_process_seconds_bucket", "processor_build_info"),
+        Set.empty,
+      )
+    }
+
     "render the same JSON every time, byte for byte" in {
       val rendered = dashboard(Stats(Stat.podsUp), Row("Processing")(Panel.rate(Definitions.processed).by(_.outcome)), Rows.catsEffect, Rows.jvm).render
       val expected = String(getClass.getResourceAsStream("/processor.json").readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)

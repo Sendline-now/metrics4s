@@ -256,10 +256,12 @@ final class Stats private (val stats: List[Stat]) extends Section
 object Stats:
   def apply(stats: Stat*): Stats = new Stats(stats.toList)
 
-final class Row private (val title: String, val panels: List[Panel]) extends Section
+final class Row private (val title: String, val panels: List[Panel], private[grafana] val shared: Boolean) extends Section
 
 object Row:
-  def apply(title: String)(panels: Panel*): Row = new Row(title, panels.toList)
+  def apply(title: String)(panels: Panel*): Row = new Row(title, panels.toList, shared = false)
+
+  private[grafana] def shared(title: String)(panels: Panel*): Row = new Row(title, panels.toList, shared = true)
 
 private[grafana] def seriesOf(definition: MetricDef): Set[String] =
   definition match
