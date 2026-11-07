@@ -264,6 +264,66 @@ final class MetricsSpec extends AnyWordSpec, Matchers:
     }
   }
 
+  "measuring an operation" should {
+    "time it and count it by the outcome of its value, or as failed when it raises, re-raising the very same error" in withMetrics() { (metrics, backend) =>
+      val time     = Eval.run(metrics.register(Histogram.seconds("processor_fetch_seconds", "Fetching of one item", Buckets.Normal).labelled[(source: Source)]))
+      val outcomes = Eval.run(metrics.register(bySource))
+      val fetch    = Measured(time, outcomes, Outcome.Error)((labels, outcome) => ByOutcome(outcome, labels.source))
+      val boom     = IllegalStateException("boom")
+      val effect   = summon[Effect[Eval]]
+
+      def fetched(source: Source)(fa: Eval[Option[Int]]) = Eval.attempt(fetch.measure((source = source))(fa)(_.fold(Outcome.Skipped)(_ => Outcome.Ok)))
+
+      val found   = fetched(Source.Kafka)(effect.delay { Thread.sleep(20); Some(1) })
+      val missing = fetched(Source.Kafka)(effect.pure(None))
+      val failed  = fetched(Source.Rabbit)(effect.raiseError(boom))
+
+      val counted = backend.series("processor_source_items")
+
+      (
+        found,
+        missing,
+        failed.left.toOption.map(error => (error eq boom, error.getSuppressed.toList)),
+        (counted(List("ok", "kafka")), counted(List("skipped", "kafka")), counted(List("error", "rabbit")), counted(List("ok", "rabbit"))),
+        backend.observed("processor_fetch_seconds", "kafka").map(observed => (observed.size, observed.headOption.exists(_ >= 0.02))),
+        backend.observed("processor_fetch_seconds", "rabbit").map(_.size),
+      ) shouldBe (
+        Right(Some(1)),
+        Right(None),
+        Some((true, Nil)),
+        (1.0, 1.0, 1.0, 0.0),
+        Some((2, true)),
+        Some(1),
+      )
+    }
+
+    "measure an operation without labels, its outcomes counted by themselves" in withMetrics() { (metrics, backend) =>
+      val (time, counter) = Eval.run(metrics.registerAll((processTime, processed)))
+      val process         = Measured(time, counter, Outcome.Error)((_, outcome) => outcome)
+
+      val result = Eval.run(process.measure(summon[Effect[Eval]].pure(3))(count => if count > 0 then Outcome.Ok else Outcome.Skipped))
+
+      (result, backend.series("processor_items")(List("ok")), backend.observed("processor_process_seconds").map(_.size)) shouldBe (3, 1.0, Some(1))
+    }
+
+    "re-raise the operation's own error when its outcome cannot be recorded, the recording failure suppressed in it" in withMetrics() { (metrics, backend) =>
+      val (time, counter) = Eval.run(metrics.registerAll((processTime, processed)))
+      val unlabelled      = IllegalArgumentException("no such outcome")
+      val process         = Measured(time, counter, Outcome.Error)((_, _) => throw unlabelled)
+      val boom            = IllegalStateException("boom")
+      val effect          = summon[Effect[Eval]]
+
+      val failed    = Eval.attempt(process.measure(effect.raiseError[Int](boom))(_ => Outcome.Ok))
+      val succeeded = Eval.attempt(process.measure(effect.pure(1))(_ => Outcome.Ok))
+
+      (failed.left.toOption.map(error => (error eq boom, error.getSuppressed.toList)), succeeded, backend.series("processor_items").values.sum) shouldBe (
+        Some((true, List(unlabelled))),
+        Left(unlabelled),
+        0.0,
+      )
+    }
+  }
+
   "observing" should {
     "report values read at scrape time, and stop once released" in withMetrics() { (metrics, backend) =>
       val reads = AtomicInteger(0)

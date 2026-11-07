@@ -2,6 +2,8 @@ package metrics4s
 
 import scala.concurrent.duration.FiniteDuration
 
+import metrics4s.internal.MeasuredImpl
+
 trait CounterOf[F[*], V, L]:
   def definition: CounterDef[V, L]
   def add(labels: L, amount: V): F[Unit]
@@ -84,3 +86,14 @@ trait InfoOf[F[*], L]:
 object InfoOf:
   trait Unsafe[L]:
     def set(labels: L): Unit
+
+trait Measured[F[*], L, O]:
+  def measure[A](labels: L)(fa: => F[A])(outcome: A => O): F[A]
+
+  final def measure[A](fa: => F[A])(outcome: A => O)(using labels: NoLabels =:= L): F[A] = measure(labels(NoLabels))(fa)(outcome)
+
+object Measured:
+  def apply[F[*], L, O, C](duration: HistogramOf[F, FiniteDuration, L], outcomes: CounterOf[F, Long, C], failed: O)(labelled: (L, O) => C)(using
+      Effect[F]
+  ): Measured[F, L, O] =
+    MeasuredImpl(duration, outcomes, failed, labelled)

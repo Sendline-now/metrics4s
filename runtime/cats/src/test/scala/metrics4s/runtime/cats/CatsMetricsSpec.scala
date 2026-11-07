@@ -16,6 +16,9 @@ import scala.concurrent.duration.given
 import metrics4s.runtime.cats.CatsInstances.given
 import metrics4s.runtime.cats.syntax.given
 
+enum Outcome derives LabelValue:
+  case Ok, Skipped, Failed
+
 final class CatsMetricsSpec extends AsyncWordSpec, AsyncIOSpec, Matchers:
   private val processTime = Histogram.seconds("processor_process_seconds", "Processing of one item", Buckets.Normal)
   private val queueSize   = Gauge("processor_queue_items", "Items waiting in the queue")
@@ -32,6 +35,30 @@ final class CatsMetricsSpec extends AsyncWordSpec, AsyncIOSpec, Matchers:
         _       <- time.timed(IO.never[Unit]).timeoutTo(30.millis, IO.unit)
         recorded = testkit.histogram(processTime)
       yield (recorded.map(_.count), recorded.exists(_.sum >= 0.03)) shouldBe (Some(2L), true)
+    }
+  }
+
+  "measuring an IO" should {
+    "time and count a success and a failure, the failure re-raised as it was, but record nothing of a cancellation" in {
+      val testkit       = MetricsTestkit()
+      val outcomes      = Counter("processor_items", "Processed items by outcome").labelled[(outcome: Outcome)]
+      val boom          = IllegalStateException("boom")
+      given Metrics[IO] = testkit.metrics[IO]
+
+      for
+        (time, counter) <- Metrics[IO].registerAll((processTime, outcomes))
+        process          = Measured(time, counter, Outcome.Failed)((_, outcome) => (outcome = outcome))
+        found           <- process.measure(IO.sleep(30.millis).as(true))(present => if present then Outcome.Ok else Outcome.Skipped)
+        failed          <- process.measure(IO.raiseError[Boolean](boom))(_ => Outcome.Ok).attempt
+        _               <- process.measure(IO.never[Boolean])(_ => Outcome.Ok).timeoutTo(30.millis, IO.pure(false))
+      yield (
+        found,
+        failed.left.toOption.exists(_ eq boom),
+        testkit.histogram(processTime).map(_.count),
+        testkit.value(outcomes, (outcome = Outcome.Ok)),
+        testkit.value(outcomes, (outcome = Outcome.Failed)),
+        testkit.value(outcomes, (outcome = Outcome.Skipped)),
+      ) shouldBe (true, true, Some(2L), Some(1.0), Some(1.0), Some(0.0))
     }
   }
 

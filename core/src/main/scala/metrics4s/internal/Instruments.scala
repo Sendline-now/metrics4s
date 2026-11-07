@@ -82,3 +82,25 @@ private[metrics4s] final class InfoImpl[F[*], L](val definition: InfoDef[L], ser
   def set(labels: L): F[Unit] = F.delay(unsafe.set(labels))
 
   def unregister: F[Unit] = F.delay(series.unregister())
+
+private[metrics4s] final class MeasuredImpl[F[*], L, O, C](
+    duration: HistogramOf[F, FiniteDuration, L],
+    outcomes: CounterOf[F, Long, C],
+    failed: O,
+    labelled: (L, O) => C,
+)(using F: Effect[F])
+    extends Measured[F, L, O]:
+
+  def measure[A](labels: L)(fa: => F[A])(outcome: A => O): F[A] =
+    F.flatMap(F.monotonic) { start =>
+      F.flatMap(F.attempt(F.suspend(fa))) { result =>
+        val recorded = F.flatMap(F.monotonic)(end => record(labels, end - start, result.fold(_ => failed, outcome)))
+
+        result match
+          case Right(value) => F.map(recorded)(_ => value)
+          case Left(error)  => F.flatMap(F.handleErrorWith(recorded)(problem => F.delay(error.addSuppressed(problem))))(_ => F.raiseError(error))
+      }
+    }
+
+  private def record(labels: L, elapsed: FiniteDuration, outcome: => O): F[Unit] =
+    F.flatMap(duration.observe(labels, elapsed))(_ => F.flatMap(F.delay(labelled(labels, outcome)))(counted => outcomes.add(counted, 1L)))
