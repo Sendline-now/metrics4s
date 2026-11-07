@@ -25,8 +25,8 @@ object Dependencies {
     val http4s  = "0.23.38"
     val tapir   = "1.14.1"
     val sttp    = "4.1.1"
-    val mongo   = "5.13.0"
-    val mongo4s = "5.1.0"
+    val mongo   = "5.14.0"
+    val mongo4s = "5.1.1"
   }
 
   object Http4s {

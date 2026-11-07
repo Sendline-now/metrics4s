@@ -28,7 +28,7 @@
 | http4s | `0.23.38` |
 | tapir | `1.14.1` |
 | sttp client | `4.1.1` |
-| MongoDB driver | `5.13.0`, and `mongo4s` `5.1.0` in the integration tests |
+| MongoDB driver | `5.14.0`, and `mongo4s` `5.1.1` in the integration tests. Drivers `5.6.0` to `5.13.0` carry [JAVA-6313](https://jira.mongodb.org/browse/JAVA-6313) |
 | Prometheus server | `v3.5.0` in the integration tests |
 | Grafana | `12.0.0` in the integration tests; the dashboards use schema version 39 |
 

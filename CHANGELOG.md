@@ -69,6 +69,10 @@ into the Sendline backend asked for, with its dashboard generated and imported i
   exhaustive match on it now warns. The message of `UnknownLabel` no longer says "to group by", because a filter
   raises it too.
 - `PrometheusExporter.allocated` fails with `ExporterException` where it raised the bare `IOException`.
+- `metrics4s-mongo` is built against the MongoDB driver `5.14.0`, from `5.13.0`. Drivers `5.6.0` to `5.13.0` nest one
+  more callback for every partial read of a reply, so a large reply read in small pieces overflows the IO thread's
+  stack and never completes ([JAVA-6313](https://jira.mongodb.org/browse/JAVA-6313)). A service that takes the
+  driver from `metrics4s-mongo` now gets the fixed one. The listeners play no part in the bug.
 - `Stat` is a sealed class. The metric stats are `MetricStat[L]`, typed by the labels `.where` filters on, and
   `Stat.podsUp` and `Stat.custom` are a `CustomStat`. `Stat.infoBy` refuses a label the info does not carry. A stat's
   `thresholds` are a `Thresholds` of `Color`s, no longer a list of strings.
