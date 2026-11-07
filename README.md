@@ -51,8 +51,8 @@ flowchart LR
 * [Modules](#modules)
 * [Known gaps](#known-gaps)
 * [Contributing](#contributing)
-* [Design notes](DESIGN.md), [Roadmap](ROADMAP.md), [Changelog](CHANGELOG.md), [Compatibility](COMPATIBILITY.md),
-  [Benchmarks](BENCHMARKS.md)
+* [Recipes](RECIPES.md), [Design notes](DESIGN.md), [Roadmap](ROADMAP.md), [Changelog](CHANGELOG.md),
+  [Compatibility](COMPATIBILITY.md), [Benchmarks](BENCHMARKS.md)
 
 ## Quick start
 
@@ -122,7 +122,8 @@ object Main extends IOApp.Simple:
 series, the cats-effect runtime and the JVM.
 
 Swap `metrics4s-cats` for `metrics4s-zio`, `-kyo` or `-rapid` and the matching `*Instances.given` import to change
-runtime. The definitions and the calls stay the same.
+runtime. The definitions and the calls stay the same. [RECIPES.md](RECIPES.md) has a ZIO service, labels known only at
+startup, errors as a label, a dashboard kept in the repository and alerting stats.
 
 ## Running it in a service
 

@@ -47,6 +47,9 @@ into the Sendline backend asked for, with its dashboard generated and imported i
     value as the stat's text (the version, not a count). `MetricsDoc` lists the series as `name_info`, type `info`.
 - **Named-tuple label selectors in dashboards.** `Panel.rate(x).by(_.route)` now compiles when the labels are a
   named tuple, `(route: Route, status: StatusClass)`, and not only a case class.
+- **[RECIPES.md](RECIPES.md):** `/metrics` on an internal http4s server, a ZIO service, labels known only at
+  startup, errors as a label, a dashboard kept in the repository and stats with thresholds. The integration tests
+  compile every block and run the recipes that do something.
 
 ### Fixed
 

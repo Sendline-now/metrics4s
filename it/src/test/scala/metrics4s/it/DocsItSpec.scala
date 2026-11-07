@@ -47,3 +47,9 @@ final class DocsItSpec extends AnyWordSpec, Matchers:
       (asked.nonEmpty, asked.filterNot(_._2 == sys.props("metrics4s.version"))) shouldBe (true, Nil)
     }
   }
+
+  "the recipes" should {
+    "show only Scala that compiles, every block copied from an example under it/src/test/scala/metrics4s/it/docs" in {
+      (blocksOf(document("RECIPES.md")).size, uncompiled("RECIPES.md")) shouldBe (6, Nil)
+    }
+  }

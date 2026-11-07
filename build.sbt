@@ -247,7 +247,7 @@ lazy val it = project
       s"-Dmetrics4s.root=${(ThisBuild / baseDirectory).value}",
       s"-Dmetrics4s.examples=${(Test / scalaSource).value / "metrics4s" / "it" / "docs"}",
     ),
-    libraryDependencies ++= Dependencies.IntegrationTesting.all :+ Dependencies.Tapir.http4sServer,
+    libraryDependencies ++= Dependencies.IntegrationTesting.all ++ Seq(Dependencies.Tapir.http4sServer, Dependencies.Http4s.dsl),
   )
   .dependsOn(core, prometheus, cats, zio, kyo, rapid, testkit, grafana, http, http4s, tapir, sttp, mongo)
 
