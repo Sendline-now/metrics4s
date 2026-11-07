@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="logos/metrics4s-dark.svg">
+    <img src="logos/metrics4s-light.svg" alt="metrics4s" height="96">
+  </picture>
+</p>
+
 # metrics4s
 
 Typed, effect-agnostic metrics for `Scala 3` on the native Prometheus Java client 1.x. No hardcoded `cats-effect`, `ZIO`
