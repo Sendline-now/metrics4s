@@ -23,7 +23,9 @@ private[grafana] object Render:
           .foldLeft[Either[GrafanaError, Vector[Json]]](Right(Vector.empty)) { (acc, stat) =>
             acc.flatMap { done =>
               val index = done.size
-              validated(stat.title, List(stat.target)).map(_ => done :+ statJson(stat, layout.id + index, (index % 6) * 4, layout.y + (index / 6) * 4))
+              stat.target.flatMap { target =>
+                validated(stat.title, List(target)).map(_ => done :+ statJson(stat, target, layout.id + index, (index % 6) * 4, layout.y + (index / 6) * 4))
+              }
             }
           }
           .map(panels => Layout(layout.y + rowsOf(panels.size, 6) * 4, layout.id + panels.size, layout.panels ++ panels))
@@ -144,7 +146,7 @@ private[grafana] object Render:
       "panels"    -> arr(),
     )
 
-  private def statJson(stat: Stat, id: Int, x: Int, y: Int): Json =
+  private def statJson(stat: Stat, target: Target, id: Int, x: Int, y: Int): Json =
     obj(
       "type"        -> str("stat"),
       "title"       -> str(stat.title),
@@ -169,7 +171,7 @@ private[grafana] object Render:
         "graphMode"     -> str(if stat.named then "none" else "area"),
         "textMode"      -> str(if stat.named then "name" else "auto"),
       ),
-      "targets"     -> arr(targetJson(stat.target, 0, legend = stat.named)),
+      "targets"     -> arr(targetJson(target, 0, legend = stat.named)),
     )
 
   private def timeseriesJson(panel: Panel, targets: List[Target], id: Int, x: Int, y: Int): Json =

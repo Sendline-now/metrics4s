@@ -24,11 +24,7 @@ final class Dashboard private (
 
   def render: Either[GrafanaError, String] = json.map(_.render + "\n")
 
-  def reads: Set[String] =
-    sections.flatMap {
-      case stats: Stats => stats.stats.map(stat => Right(List(stat.target)))
-      case row: Row     => row.panels.map(_.targets)
-    }.flatMap(_.toOption.toList.flatten).flatMap(_.reads).toSet
+  def reads: Set[String] = Dashboard.readsOf(sections)
 
   def writeTo(directory: Path): Either[Throwable, Path] =
     for
@@ -39,3 +35,9 @@ final class Dashboard private (
 object Dashboard:
   def apply(uid: String, title: String, group: String, services: ServiceFilter)(sections: Section*): Dashboard =
     new Dashboard(uid, title, group, services, s"$uid: its own metrics, the runtime and the JVM.", sections.toList)
+
+  private def readsOf(sections: List[Section]): Set[String] =
+    sections.flatMap {
+      case stats: Stats => stats.stats.map(_.target.map(List(_)))
+      case row: Row     => row.panels.map(_.targets)
+    }.flatMap(_.toOption.toList.flatten).flatMap(_.reads).toSet

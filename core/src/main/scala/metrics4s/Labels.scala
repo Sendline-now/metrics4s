@@ -47,6 +47,8 @@ final class Labels[L] private (val names: IArray[String], fields: IArray[LabelVa
       field -= 1
     IArray.unsafeFromArray(out)
 
+  private[metrics4s] def renderField(field: Int, value: Any): String = fields(field).render(value)
+
   override def toString: String = names.mkString("Labels(", ", ", ")")
 
 object Labels:

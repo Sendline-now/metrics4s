@@ -24,8 +24,8 @@ object Query:
     then s"sum($expr)"
     else s"sum by (${labels.mkString(", ")}) ($expr)"
 
-  def quantile(quantile: Double, bucket: String, by: Seq[String]): String =
-    s"histogram_quantile($quantile, ${sumBy("le" +: by)(rate(bucket))})"
+  def quantile(quantile: Double, bucket: String, by: Seq[String], matchers: String*): String =
+    s"histogram_quantile($quantile, ${sumBy("le" +: by)(rate(bucket, matchers*))})"
 
   def legendOf(labels: Seq[String]): Option[String] =
     Option.when(labels.nonEmpty)(labels.map(label => s"{{$label}}").mkString(" "))

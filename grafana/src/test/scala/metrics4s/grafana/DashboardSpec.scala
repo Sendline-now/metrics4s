@@ -15,6 +15,11 @@ enum Source derives LabelValue:
 
 final case class ByOutcome(outcome: Outcome, source: Source) derives Labels
 
+final case class Route(template: String)
+
+object Route:
+  given LabelValue[Route] = LabelValue.bounded(_.template)
+
 object Definitions:
   val processed   = Counter("processor_items", "Processed items").labelled[ByOutcome]
   val received    = Counter("processor_received", "Received items")
@@ -22,6 +27,9 @@ object Definitions:
   val cacheSize   = Gauge("processor_cache_entries", "Entries in the cache")
   val payload     = Histogram.bytes("processor_payload_bytes", "Size of a payload", Buckets(512, 4096, 65536))
   val build       = Info("processor_build", "The build that runs").labelled[(source: Source)]
+  val routed      = Counter("processor_routed", "Routed items").labelled[(sourceQueue: Source, outcome: Outcome)]
+  val byRoute     = Counter("processor_route_items", "Items by route").labelled[(route: Route)]
+  val byOutcome   = Counter("processor_outcomes", "Items by outcome").labelled(using Labels.single[Outcome]("outcome"))
 
 final class DashboardSpec extends AnyWordSpec, Matchers:
   private val F = Query.Filter
@@ -94,6 +102,96 @@ final class DashboardSpec extends AnyWordSpec, Matchers:
     }
   }
 
+  "a quantile panel" should {
+    "draw the one quantile it is asked for, named in the title and grouped like any other panel" in {
+      val panel = Panel.quantile(Definitions.processTime, 0.95)
+
+      (exprs(panel), exprs(panel.by(_.source)), panel.title, Panel.quantile(Definitions.processTime, 0.999).title, panel.unit) shouldBe (
+        List(s"histogram_quantile(0.95, sum by (le) (rate(processor_process_seconds_bucket{$F}[$$__rate_interval])))"         -> Some("p95")),
+        List(s"histogram_quantile(0.95, sum by (le, source) (rate(processor_process_seconds_bucket{$F}[$$__rate_interval])))" -> Some("{{source}}")),
+        "Processing of one item, p95",
+        "Processing of one item, p99.9",
+        "s",
+      )
+    }
+
+    "refuse a quantile outside of 0 and 1, as a panel and as a stat" in {
+      (Panel.quantile(Definitions.processTime, 1.5).targets, dashboard(Stats(Stat.quantile(Definitions.processTime, 0))).render) shouldBe (
+        Left(GrafanaError.InvalidQuantile("Processing of one item, p150", 1.5)),
+        Left(GrafanaError.InvalidQuantile("Processing of one item, p0", 0.0)),
+      )
+    }
+  }
+
+  "a filtered panel" should {
+    "add its matchers to every series it reads, with the values rendered as the label renders them" in {
+      val refused = Panel.rate(Definitions.processed).where(_.outcome =!= Outcome.Ok).by(_.source)
+      val kafka   = Panel.latency(Definitions.processTime).where(_.source === Source.Kafka).where(_.outcome.in(Outcome.Skipped, Outcome.Error))
+      val settled = Panel.rate(Definitions.processed).where(_.outcome.notIn(Outcome.Ok, Outcome.Skipped))
+      val errors  = Panel.rate(Definitions.processed).where(_.outcome.in(Outcome.Error, Outcome.Error))
+
+      (exprs(refused), exprs(kafka).head, exprs(settled).map(_._1), exprs(errors).map(_._1)) shouldBe (
+        List(s"""sum by (source) (rate(processor_items_total{$F, outcome!="ok"}[$$__rate_interval]))""" -> Some("{{source}}")),
+        s"""histogram_quantile(0.5, sum by (le) (rate(processor_process_seconds_bucket{$F, source="kafka", outcome=~"skipped|error"}[$$__rate_interval])))""" ->
+          Some("p50"),
+        List(s"""sum(rate(processor_items_total{$F, outcome!~"ok|skipped"}[$$__rate_interval]))"""),
+        List(s"""sum(rate(processor_items_total{$F, outcome="error"}[$$__rate_interval]))"""),
+      )
+    }
+
+    "match a field of a named tuple, and the one label of a metric labelled by a single value" in {
+      (
+        exprs(Panel.rate(Definitions.routed).where(_.sourceQueue === Source.Rabbit)).map(_._1),
+        exprs(Panel.rate(Definitions.byOutcome).where(_ =!= Outcome.Ok)).map(_._1),
+        Panel.rate(Definitions.processed).where(_ === ByOutcome(Outcome.Ok, Source.Kafka)).targets,
+      ) shouldBe (
+        List(s"""sum(rate(processor_routed_total{$F, source_queue="rabbit"}[$$__rate_interval]))"""),
+        List(s"""sum(rate(processor_outcomes_total{$F, outcome!="ok"}[$$__rate_interval]))"""),
+        Left(GrafanaError.NotOneLabel("Processed items, /s", List("outcome", "source"))),
+      )
+    }
+
+    "escape what a value holds, and refuse a value the label does not have" in {
+      val known =
+        given LabelValue[Route] = LabelValue.enumerated(List(Route("GET /events")))(_.template)
+        Counter("processor_known_routes", "Items by known route").labelled[(route: Route)]
+
+      (
+        exprs(Panel.rate(Definitions.byRoute).where(_.route.in(Route("GET /events/{id}"), Route("say \"hi\"")))).map(_._1),
+        Panel.rate(known).where(_.route === Route("GET /nope")).targets,
+      ) shouldBe (
+        List(raw"""sum(rate(processor_route_items_total{$F, route=~"GET /events/\\{id\\}|say \"hi\""}[$$__rate_interval]))"""),
+        Left(GrafanaError.UnknownLabelValue("Items by known route, /s", "route", "Route(GET /nope)")),
+      )
+    }
+
+    "not compile with a value of another type, nor with anything but a label field on the left" in {
+      (
+        typeCheckErrors("Panel.rate(Definitions.processed).where(_.outcome === Source.Kafka)").nonEmpty,
+        typeCheckErrors("Panel.rate(Definitions.processed).where(_.outcome.ordinal === 1)").map(_.message),
+      ) shouldBe (
+        true,
+        List("Compare one label field of the metric with values of its type, as in _.outcome === Outcome.Ok"),
+      )
+    }
+  }
+
+  "a share panel" should {
+    "divide the rate that matches by the whole rate, grouped and filtered alike on both sides" in {
+      val hits = Panel.share(Definitions.processed)(_.outcome === Outcome.Ok)
+
+      (exprs(hits), exprs(hits.by(_.source).where(_.source =!= Source.Rabbit)), hits.title, hits.unit) shouldBe (
+        List(s"""sum(rate(processor_items_total{$F, outcome="ok"}[$$__rate_interval])) / sum(rate(processor_items_total{$F}[$$__rate_interval]))"""                                                            -> Some("share")),
+        List(
+          s"""sum by (source) (rate(processor_items_total{$F, source!="rabbit", outcome="ok"}[$$__rate_interval])) / sum by (source) (rate(processor_items_total{$F, source!="rabbit"}[$$__rate_interval]))""" ->
+            Some("{{source}}")
+        ),
+        "Processed items, share",
+        "percentunit",
+      )
+    }
+  }
+
   "a gauge panel" should {
     "show each pod, or aggregate them" in {
       (
@@ -125,6 +223,26 @@ final class DashboardSpec extends AnyWordSpec, Matchers:
 
     "read the series with _info added" in {
       dashboard(Stats(Stat.info(Definitions.build)(_.source))).reads shouldBe Set("processor_build_info")
+    }
+  }
+
+  "a share stat and a quantile stat" should {
+    "read the whole service, the share through the counter's own label values" in {
+      val stats = panelsOf(
+        dashboard(Stats(Stat.share(Definitions.processed)(_.outcome.in(Outcome.Skipped, Outcome.Error)), Stat.quantile(Definitions.processTime, 0.99))).json
+          .fold(error => fail(error.message), identity)
+      )
+
+      val queries = stats.map(_.field("targets")).collect { case Some(Json.Arr(target :: Nil)) => string(target, "expr") }
+
+      (stats.map(string(_, "title")), stats.map(string(_, "fieldConfig", "defaults", "unit")), queries) shouldBe (
+        List("Processed items, share", "Processing of one item, p99"),
+        List("percentunit", "s"),
+        List(
+          s"""sum(rate(processor_items_total{$F, outcome=~"skipped|error"}[$$__rate_interval])) / sum(rate(processor_items_total{$F}[$$__rate_interval]))""",
+          s"histogram_quantile(0.99, sum by (le) (rate(processor_process_seconds_bucket{$F}[$$__rate_interval])))",
+        ),
+      )
     }
   }
 
