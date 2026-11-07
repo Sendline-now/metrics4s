@@ -34,7 +34,14 @@ object ProcessorMetrics:
   val cacheSize   = Gauge("processor_cache_entries", "Entries in the cache")
 
   val dashboard: Dashboard = Dashboard("line-processor", "Line / processor", "line", ServiceFilter.regex("([a-z]+-)?processor.*"))(
-    Stats(Stat.podsUp, Stat.rate(processed), Stat.p95(processTime), Stat.gauge(cacheSize)),
+    Stats(
+      Stat.podsUp,
+      Stat.rate(processed),
+      Stat.p95(processTime),
+      Stat.gauge(cacheSize),
+      Stat.quantile(processTime, 0.99),
+      Stat.share(processed)(_.outcome === Outcome.Error),
+    ),
     Row("Processing")(
       Panel.rate(processed).by(_.outcome),
       Panel.rate(processed).byAll,
@@ -42,9 +49,20 @@ object ProcessorMetrics:
       Panel.average(processTime),
       Panel.gauge(cacheSize),
     ),
+    Row("Filtered")(
+      Panel.rate(processed).by(_.source).where(_.outcome.in(Outcome.Ok, Outcome.Error)),
+      Panel.quantile(processTime, 0.95).by(_.outcome).where(_.outcome =!= Outcome.Skipped),
+      Panel.share(processed)(_.outcome === Outcome.Error).by(_.source),
+    ),
     Rows.catsEffect,
     Rows.jvm,
   )
+
+final case class Processing(
+    processed: CounterOf[IO, Long, ByOutcome],
+    processTime: HistogramOf[IO, FiniteDuration, (outcome: Outcome)],
+    cacheSize: GaugeOf[IO, Double, NoLabels],
+)
 
 final class ObservabilityItSpec extends AnyWordSpec, Matchers, BeforeAndAfterAll:
   import ProcessorMetrics.*
@@ -60,24 +78,23 @@ final class ObservabilityItSpec extends AnyWordSpec, Matchers, BeforeAndAfterAll
   private val rateInterval                    = "30s"
   private val onLinux                         = System.getProperty("os.name").toLowerCase.contains("linux")
 
-  private def traffic(instruments: (CounterOf[IO, Long, ByOutcome], HistogramOf[IO, FiniteDuration, (outcome: Outcome)], GaugeOf[IO, Double, NoLabels])): IO[Unit] =
-    val (items, time, cache) = instruments
-    val once                 =
-      items.inc(ByOutcome(Outcome.Ok, Source.Kafka)) >>
-        items.add(ByOutcome(Outcome.Error, Source.Rabbit), 2) >>
-        time.observe((outcome = Outcome.Ok), 120.millis) >>
-        time.observe((outcome = Outcome.Error), 2.seconds) >>
-        cache.set(42)
+  private def traffic(processing: Processing): IO[Unit] =
+    val once =
+      processing.processed.inc(ByOutcome(Outcome.Ok, Source.Kafka)) >>
+        processing.processed.add(ByOutcome(Outcome.Error, Source.Rabbit), 2) >>
+        processing.processTime.observe((outcome = Outcome.Ok), 120.millis) >>
+        processing.processTime.observe((outcome = Outcome.Error), 2.seconds) >>
+        processing.cacheSize.set(42)
     (once >> IO.sleep(100.millis)).foreverM
 
   override def beforeAll(): Unit =
     val stack =
       for
-        exporter    <- PrometheusExporter.allocated[IO](0, registry).toResource
-        _           <- Resource.eval(PrometheusMetrics.jvm[IO](registry))
-        _           <- CatsRuntimeMetrics.resource[IO]()
-        instruments <- Resource.eval(Metrics[IO].registerAll((processed, processTime, cacheSize)))
-        _           <- traffic(instruments).background
+        exporter   <- PrometheusExporter.allocated[IO](0, registry).toResource
+        _          <- Resource.eval(PrometheusMetrics.jvm[IO](registry))
+        _          <- CatsRuntimeMetrics.resource[IO]()
+        processing <- Resource.eval(Metrics[IO].registerAs[Processing]((processed = processed, processTime = processTime, cacheSize = cacheSize)))
+        _          <- traffic(processing).background
       yield exporter.port
 
     val (port, close) = stack.allocated.unsafeRunSync()
@@ -104,6 +121,13 @@ final class ObservabilityItSpec extends AnyWordSpec, Matchers, BeforeAndAfterAll
   private def resultOf(json: ujson.Value): Vector[ujson.Value] = json("data")("result").arr.toVector
 
   private def boundOf(le: String): Double = if le == "+Inf" then Double.PositiveInfinity else le.toDouble
+
+  private def panels: List[ujson.Value] = ujson.read(ProcessorMetrics.dashboard.render.fold(error => fail(error.message), identity))("panels").arr.toList
+
+  private def throughGrafana(expr: String): Vector[ujson.Value] =
+    val substituted =
+      expr.replace("$namespace", "it").replace("$service", "line-processor").replace("$pod", "processor-0").replace("$__rate_interval", rateInterval)
+    resultOf(Http.query(s"${grafana.url}/api/datasources/proxy/uid/prometheus", substituted, grafana = true))
 
   "Prometheus scraping the exporter" should {
     "find every combination of an enumerated domain under the name the code defines, the ones never recorded at zero" in {
@@ -162,20 +186,22 @@ final class ObservabilityItSpec extends AnyWordSpec, Matchers, BeforeAndAfterAll
     }
 
     "answer every query of every panel through its Prometheus datasource" in {
-      val dashboard = ujson.read(ProcessorMetrics.dashboard.render.fold(error => fail(error.message), identity))
-      val targets   =
-        dashboard("panels").arr.toList.flatMap(panel => panel.obj.get("targets").toList.flatMap(_.arr).map(target => panel("title").str -> target("expr").str))
+      val targets = panels.flatMap(panel => panel.obj.get("targets").toList.flatMap(_.arr).map(target => panel("title").str -> target("expr").str))
 
-      def substituted(expr: String): String =
-        expr.replace("$namespace", "it").replace("$service", "line-processor").replace("$pod", "processor-0").replace("$__rate_interval", rateInterval)
-
-      def empty(): List[(String, String)] =
-        targets.filter { (_, expr) =>
-          resultOf(Http.query(s"${grafana.url}/api/datasources/proxy/uid/prometheus", substituted(expr), grafana = true)).isEmpty
-        }
+      def empty(): List[(String, String)] = targets.filter((_, expr) => throughGrafana(expr).isEmpty)
 
       val expected = if onLinux then Nil else targets.filter(_._2.contains("process_resident_memory_bytes"))
 
       Eventually(60.seconds)(Option(empty()).filter(_ == expected)).getOrElse(empty()) shouldBe expected
+    }
+
+    "draw the share a typed filter picks out of a counter, all of each source's errors and none of its successes" in {
+      val share = panels.find(panel => panel("title").str == "Processed items, share" && panel("type").str != "stat").map(_("targets")(0)("expr").str)
+
+      val bySource = Eventually(60.seconds) {
+        share.map(throughGrafana).map(_.map(point => point("metric")("source").str -> point("value")(1).str.toDouble).toMap).filter(_.size == 2)
+      }
+
+      bySource shouldBe Some(Map("kafka" -> 0.0, "rabbit" -> 1.0))
     }
   }
