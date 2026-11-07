@@ -5,6 +5,36 @@
 Notable changes per release. Breaking changes and how to migrate are in [COMPATIBILITY.md](COMPATIBILITY.md); what is
 not covered yet is in [ROADMAP.md](ROADMAP.md).
 
+## 0.2.0
+
+Found while wiring the library into a service: the Sendline backend, with its dashboard generated and imported into
+Grafana.
+
+### Added
+
+- **Info metrics.** `Info("name", "help").labelled[L]` is a constant series `name_info = 1` whose labels carry the
+  facts: the build's version, the stage, a configuration. `register` gives an `InfoOf[F, L]`, whose `set(labels)`
+  replaces the previous labels, so one copy shows exactly one series.
+  - The name is checked at compile time like the others, and a unit suffix is refused: an info carries no unit.
+  - `MetricsBackend.info` is a new SPI member with a default that refuses, so an existing backend still compiles.
+    The Prometheus backend implements it with the client's `Info`.
+  - `metrics4s-grafana`: `Stat.info(definition)(_.label)` and `Stat.infoBy(definition, "label")` show a label's
+    value as the stat's text (the version, not a count). `MetricsDoc` lists the series as `name_info`, type `info`.
+- **Named-tuple label selectors in dashboards.** `Panel.rate(x).by(_.route)` now compiles when the labels are a
+  named tuple, `(route: Route, status: StatusClass)`, and not only a case class.
+
+### Fixed
+
+- **`metrics4s-tapir` counted a request twice when its body failed after the headers.** Tapir calls both the
+  response callback and the exception callback for such a request. It was counted once as its status and once as
+  `failed`, and `http_server_in_flight` went below zero. A request now finishes once, whichever callback comes
+  first.
+
+### Changed
+
+- `MetricKind` has a new case, `Info`. A match on it in user code that was exhaustive now warns.
+- `.gitattributes` keeps `*.json` with LF endings, so the byte-for-byte dashboard tests pass on a Windows checkout.
+
 ## 0.1.0
 
 The first release.
