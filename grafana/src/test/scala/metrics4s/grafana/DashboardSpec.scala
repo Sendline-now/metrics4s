@@ -59,6 +59,15 @@ final class DashboardSpec extends AnyWordSpec, Matchers:
       )
     }
 
+    "group a metric labelled by a named tuple by the field it selects" in {
+      val panel = Panel.rate(Counter("processor_routed", "Routed items").labelled[(sourceQueue: Source, outcome: Outcome)])
+
+      (exprs(panel.by(_.outcome)), exprs(panel.by(_.sourceQueue))) shouldBe (
+        List(s"sum by (outcome) (rate(processor_routed_total{$F}[$$__rate_interval]))"      -> Some("{{outcome}}")),
+        List(s"sum by (source_queue) (rate(processor_routed_total{$F}[$$__rate_interval]))" -> Some("{{source_queue}}")),
+      )
+    }
+
     "refuse a label the counter does not have, and not compile with anything but a field" in {
       (
         Panel.rate(Definitions.processed).byLabel("provider").targets,
