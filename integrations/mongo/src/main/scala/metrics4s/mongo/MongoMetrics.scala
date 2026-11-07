@@ -54,6 +54,29 @@ final class MongoMetrics private (val collections: List[Collection]):
   private given LabelValue[Collection] = LabelValue.enumerated(collections :+ Collection.Other)(_.name)
 
   val commands: HistogramDef[FiniteDuration, (command: Command, collection: Collection)] =
+    MongoMetrics.commands.labelled[(command: Command, collection: Collection)]
+
+  val failures: CounterDef[Long, (command: Command, collection: Collection)] = MongoMetrics.failures.labelled[(command: Command, collection: Collection)]
+
+  val connections: GaugeDef[Double, (state: ConnectionState)] = MongoMetrics.connections
+
+  val checkOut: HistogramDef[FiniteDuration, NoLabels] = MongoMetrics.checkOut
+
+  val checkOutFailures: CounterDef[Long, (reason: CheckOutFailure)] = MongoMetrics.checkOutFailures
+
+  val definitions: List[MetricDef] = List(commands, failures, connections, checkOut, checkOutFailures)
+
+  def collection(name: Option[String]): Collection = name.map(Collection(_)).filter(known).getOrElse(Collection.Other)
+
+  def register[F[*]](using metrics: Metrics[F], F: Effect[F]): F[MongoListeners] =
+    F.map(metrics.registerAll((commands, failures, connections, checkOut, checkOutFailures))) { (commands, failures, connections, checkOut, checkOutFailures) =>
+      MongoListeners(this, commands.unsafe, failures.unsafe, connections.unsafe, checkOut.unsafe, checkOutFailures.unsafe)
+    }
+
+object MongoMetrics:
+  private given LabelValue[Collection] = LabelValue.bounded(_.name)
+
+  val commands: HistogramDef[FiniteDuration, (command: Command, collection: Collection)] =
     Histogram
       .seconds("mongo_command_seconds", "Time of a command, from sending it to its reply", Buckets.Normal)
       .labelled[(command: Command, collection: Collection)]
@@ -73,14 +96,6 @@ final class MongoMetrics private (val collections: List[Collection]):
 
   val definitions: List[MetricDef] = List(commands, failures, connections, checkOut, checkOutFailures)
 
-  def collection(name: Option[String]): Collection = name.map(Collection(_)).filter(known).getOrElse(Collection.Other)
-
-  def register[F[*]](using metrics: Metrics[F], F: Effect[F]): F[MongoListeners] =
-    F.map(metrics.registerAll((commands, failures, connections, checkOut, checkOutFailures))) { (commands, failures, connections, checkOut, checkOutFailures) =>
-      MongoListeners(this, commands.unsafe, failures.unsafe, connections.unsafe, checkOut.unsafe, checkOutFailures.unsafe)
-    }
-
-object MongoMetrics:
   def apply(collections: Seq[String]): MongoMetrics =
     new MongoMetrics(collections.distinct.filterNot(_ == Collection.Other.name).map(Collection(_)).toList)
 

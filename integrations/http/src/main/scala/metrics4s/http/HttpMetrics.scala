@@ -38,13 +38,11 @@ final class HttpServerMetrics private (val routes: List[Route]):
 
   private given LabelValue[Route] = LabelValue.enumerated(routes :+ Route.Unmatched)(_.template)
 
-  val requests: CounterDef[Long, (route: Route, status: StatusClass)] =
-    Counter("http_server_requests", "Handled HTTP requests by route template and status class").labelled[(route: Route, status: StatusClass)]
+  val requests: CounterDef[Long, (route: Route, status: StatusClass)] = HttpServerMetrics.requests.labelled[(route: Route, status: StatusClass)]
 
-  val duration: HistogramDef[FiniteDuration, (route: Route)] =
-    Histogram.seconds("http_server_request_seconds", "Time from the request to the response headers", Buckets.Normal).labelled[(route: Route)]
+  val duration: HistogramDef[FiniteDuration, (route: Route)] = HttpServerMetrics.duration.labelled[(route: Route)]
 
-  val inFlight: GaugeDef[Double, NoLabels] = Gauge("http_server_in_flight", "HTTP requests being handled")
+  val inFlight: GaugeDef[Double, NoLabels] = HttpServerMetrics.inFlight
 
   val definitions: List[MetricDef] = List(requests, duration, inFlight)
 
@@ -56,6 +54,18 @@ final class HttpServerMetrics private (val routes: List[Route]):
     )
 
 object HttpServerMetrics:
+  private given LabelValue[Route] = LabelValue.bounded(_.template)
+
+  val requests: CounterDef[Long, (route: Route, status: StatusClass)] =
+    Counter("http_server_requests", "Handled HTTP requests by route template and status class").labelled[(route: Route, status: StatusClass)]
+
+  val duration: HistogramDef[FiniteDuration, (route: Route)] =
+    Histogram.seconds("http_server_request_seconds", "Time from the request to the response headers", Buckets.Normal).labelled[(route: Route)]
+
+  val inFlight: GaugeDef[Double, NoLabels] = Gauge("http_server_in_flight", "HTTP requests being handled")
+
+  val definitions: List[MetricDef] = List(requests, duration, inFlight)
+
   def apply(routes: Seq[String]): HttpServerMetrics = new HttpServerMetrics(routes.distinct.filterNot(_ == Route.Unmatched.template).map(Route(_)).toList)
 
 final class HttpServerRecorder private[http] (
@@ -81,12 +91,11 @@ final class HttpClientMetrics private (val operations: List[Operation]):
   private given LabelValue[Operation] = LabelValue.enumerated(operations :+ Operation.Other)(_.name)
 
   val requests: CounterDef[Long, (operation: Operation, status: StatusClass)] =
-    Counter("http_client_requests", "HTTP requests sent by operation and status class").labelled[(operation: Operation, status: StatusClass)]
+    HttpClientMetrics.requests.labelled[(operation: Operation, status: StatusClass)]
 
-  val duration: HistogramDef[FiniteDuration, (operation: Operation)] =
-    Histogram.seconds("http_client_request_seconds", "Time from sending a request to its response headers", Buckets.Normal).labelled[(operation: Operation)]
+  val duration: HistogramDef[FiniteDuration, (operation: Operation)] = HttpClientMetrics.duration.labelled[(operation: Operation)]
 
-  val inFlight: GaugeDef[Double, NoLabels] = Gauge("http_client_in_flight", "HTTP requests waiting for a response")
+  val inFlight: GaugeDef[Double, NoLabels] = HttpClientMetrics.inFlight
 
   val definitions: List[MetricDef] = List(requests, duration, inFlight)
 
@@ -98,6 +107,18 @@ final class HttpClientMetrics private (val operations: List[Operation]):
     )
 
 object HttpClientMetrics:
+  private given LabelValue[Operation] = LabelValue.bounded(_.name)
+
+  val requests: CounterDef[Long, (operation: Operation, status: StatusClass)] =
+    Counter("http_client_requests", "HTTP requests sent by operation and status class").labelled[(operation: Operation, status: StatusClass)]
+
+  val duration: HistogramDef[FiniteDuration, (operation: Operation)] =
+    Histogram.seconds("http_client_request_seconds", "Time from sending a request to its response headers", Buckets.Normal).labelled[(operation: Operation)]
+
+  val inFlight: GaugeDef[Double, NoLabels] = Gauge("http_client_in_flight", "HTTP requests waiting for a response")
+
+  val definitions: List[MetricDef] = List(requests, duration, inFlight)
+
   def apply(operations: Seq[String]): HttpClientMetrics =
     new HttpClientMetrics(operations.distinct.filterNot(_ == Operation.Other.name).map(Operation(_)).toList)
 

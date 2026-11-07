@@ -10,8 +10,8 @@ import com.mongodb.connection.{ClusterId, ConnectionDescription, ConnectionId, S
 import com.mongodb.event.*
 import org.bson.{BsonDocument, BsonInt32, BsonString}
 
-import metrics4s.{Eval, Metrics}
-import metrics4s.grafana.{Dashboard, Rows, ServiceFilter}
+import metrics4s.{Eval, MetricDef, Metrics}
+import metrics4s.grafana.{Dashboard, Row, Rows, ServiceFilter}
 import metrics4s.testkit.MetricsTestkit
 
 import metrics4s.Eval.given
@@ -82,6 +82,21 @@ final class MongoMetricsSpec extends AnyWordSpec, Matchers:
         Some(1.0),
         Some(0.0),
         Set("mongo_command_seconds_count", "mongo_command_seconds_bucket", "mongo_command_failures_total")
+      )
+    }
+  }
+
+  "the MongoDB definitions" should {
+    "describe the same series without the collections as with them, and serve every series the shared row reads" in {
+      def shape(definition: MetricDef) =
+        (definition.name.value, definition.help, definition.kind, definition.unit, definition.labelNames.toList, definition.preCreated)
+
+      (
+        MongoMetrics.definitions.map(shape),
+        Dashboard("api", "Line / api", "line", ServiceFilter.regex("api"))(Row("MongoDB")(Rows.mongo.panels*)).missingSeries(MongoMetrics.definitions),
+      ) shouldBe (
+        MongoMetrics(List("users")).definitions.map(shape),
+        Set.empty,
       )
     }
   }
