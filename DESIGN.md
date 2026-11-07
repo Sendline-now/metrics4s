@@ -518,10 +518,14 @@ values), so `metrics4s-grafana` builds the JSON from them.
 * **Filters are typed the same way.** `.where(_.outcome =!= Outcome.Ok)` is read by a macro that accepts one label field
   compared with values of its type, and the values are rendered through the label's `LabelValue`. A filter typed as a
   string had to guess that `BadCredentials` renders as `bad_credentials`, and matched nothing once the case was
-  renamed. A value outside an enumerated domain fails `render`.
+  renamed. A value outside an enumerated domain fails `render`. Stats take the same filters, so a stat for one source
+  or one route is not a custom query either.
 * **One quantile and shares are panels of their own**, because services kept writing them as custom queries:
   `Panel.quantile(h, 0.95)` instead of three lines per label value, and `Panel.share(counter)(condition)` for a hit or
   error ratio.
+* **Thresholds are colours and increasing numbers.** `.withThresholds(Color.Green, 0.01 -> Color.Orange)` writes
+  Grafana's steps with the base first. Steps out of order are accepted by Grafana and colour the stat wrongly, so
+  `render` refuses them.
 * **`dashboard.missingSeries(definitions)`** is the drift check without a registry: the series the dashboard's own
   panels and stats read, minus the ones the definitions serve. The shared rows are left out of it, since the library
   checks them against the runtime metrics and the integrations' definitions.

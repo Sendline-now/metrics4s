@@ -8,6 +8,7 @@ enum GrafanaError:
   case NotOneLabel(panel: String, labels: List[String])
   case UnknownLabelValue(panel: String, label: String, value: String)
   case InvalidQuantile(panel: String, quantile: Double)
+  case InvalidThresholds(panel: String, values: List[Double])
 
   def message: String =
     this match
@@ -18,3 +19,4 @@ enum GrafanaError:
       case NotOneLabel(panel, labels)             => s"$panel: compare one label field, as in _.outcome === Outcome.Ok, not all of ${labels.mkString(", ")}"
       case UnknownLabelValue(panel, label, value) => s"$panel: $value is not a value of label \"$label\""
       case InvalidQuantile(panel, quantile)       => s"$panel: a quantile is between 0 and 1, not $quantile"
+      case InvalidThresholds(panel, values)       => s"$panel: threshold values must be finite and increasing, not ${values.mkString(", ")}"

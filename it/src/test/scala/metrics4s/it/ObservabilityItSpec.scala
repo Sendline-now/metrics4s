@@ -41,7 +41,11 @@ object ProcessorMetrics:
       Stat.gauge(cacheSize),
       Stat.quantile(processTime, 0.99),
       Stat.share(processed)(_.outcome === Outcome.Error),
-      Stat.share(processed)(_.outcome === Outcome.Error).where(_.source === Source.Kafka).titled("Kafka errors, share"),
+      Stat
+        .share(processed)(_.outcome === Outcome.Error)
+        .where(_.source === Source.Kafka)
+        .titled("Kafka errors, share")
+        .withThresholds(Color.Green, 0.01 -> Color.Orange, 0.05 -> Color.Red),
     ),
     Row("Processing")(
       Panel.rate(processed).by(_.outcome),
@@ -173,16 +177,20 @@ final class ObservabilityItSpec extends AnyWordSpec, Matchers, BeforeAndAfterAll
   }
 
   "Grafana" should {
-    "import the generated dashboard as it is" in {
+    "import the generated dashboard as it is, the thresholds of its stats included" in {
       val dashboard      = ujson.read(ProcessorMetrics.dashboard.render.fold(error => fail(error.message), identity))
       val (status, body) = Http.post(s"${grafana.url}/api/dashboards/db", ujson.Obj("dashboard" -> dashboard, "overwrite" -> true).render(), grafana = true)
       val stored         = ujson.read(Http.get(s"${grafana.url}/api/dashboards/uid/line-processor", grafana = true)._2)("dashboard")
 
-      (status, ujson.read(body)("status").str, stored("panels").arr.size, stored("templating")("list").arr.map(_("name").str).toList) shouldBe (
+      def thresholds(json: ujson.Value): List[ujson.Value] =
+        json("panels").arr.filter(_("type").str == "stat").map(_("fieldConfig")("defaults")("thresholds")).toList
+
+      (status, ujson.read(body)("status").str, stored("panels").arr.size, stored("templating")("list").arr.map(_("name").str).toList, thresholds(stored)) shouldBe (
         200,
         "success",
         dashboard("panels").arr.size,
         List("datasource", "namespace", "service", "pod"),
+        thresholds(dashboard),
       )
     }
 

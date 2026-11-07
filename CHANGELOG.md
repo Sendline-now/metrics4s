@@ -32,6 +32,8 @@ into the Sendline backend asked for, with its dashboard generated and imported i
   - **one quantile:** `Panel.quantile(histogram, 0.95)` and `Stat.quantile(histogram, 0.95)`;
   - **shares:** `Panel.share(counter)(condition)` and `Stat.share(counter)(condition)`, the matching part of the rate
     over all of it, in `percentunit`;
+  - **stat thresholds:** `.withThresholds(Color.Green, 0.01 -> Color.Orange, 0.05 -> Color.Red)`, refused by `render`
+    unless the values are finite and increasing;
   - **the drift check:** `dashboard.missingSeries(definitions)` lists the series the dashboard's own panels and stats
     read that no definition serves. `dashboard.reads` is every series it reads.
 
@@ -58,11 +60,13 @@ into the Sendline backend asked for, with its dashboard generated and imported i
 - Every module is compiled to Java 17 class files against the JDK 17 API, so it runs on JDK 17. `metrics4s-rapid`
   needs 21 and `metrics4s-kyo` needs 25, like rapid and Kyo themselves. Only the build needs JDK 25.
 - `MetricKind` has a new case, `Info`. A match on it in user code that was exhaustive now warns.
-- `GrafanaError` has new cases, `NotOneLabel`, `UnknownLabelValue` and `InvalidQuantile`, so an exhaustive match on it
-  now warns. The message of `UnknownLabel` no longer says "to group by", because a filter raises it too.
+- `GrafanaError` has new cases, `NotOneLabel`, `UnknownLabelValue`, `InvalidQuantile` and `InvalidThresholds`, so an
+  exhaustive match on it now warns. The message of `UnknownLabel` no longer says "to group by", because a filter
+  raises it too.
 - `PrometheusExporter.allocated` fails with `ExporterException` where it raised the bare `IOException`.
 - `Stat` is a sealed class. The metric stats are `MetricStat[L]`, typed by the labels `.where` filters on, and
-  `Stat.podsUp` and `Stat.custom` are a `CustomStat`. `Stat.infoBy` refuses a label the info does not carry.
+  `Stat.podsUp` and `Stat.custom` are a `CustomStat`. `Stat.infoBy` refuses a label the info does not carry. A stat's
+  `thresholds` are a `Thresholds` of `Color`s, no longer a list of strings.
 - `.gitattributes` keeps `*.json` with LF endings, so the byte-for-byte dashboard tests pass on a Windows checkout.
 
 ## 0.1.0

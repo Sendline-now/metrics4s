@@ -168,10 +168,11 @@ sealed abstract class Stat:
   def title: String
   def description: String
   def unit: String
-  def thresholds: List[(String, Option[Double])]
+  def thresholds: Thresholds
   def titled(next: String): Stat
   def described(next: String): Stat
   def withUnit(next: String): Stat
+  def withThresholds(base: Color, steps: (Double, Color)*): Stat
   private[grafana] def named: Boolean
   private[grafana] def target: Either[GrafanaError, Target]
 
@@ -179,7 +180,7 @@ final class MetricStat[L] private[grafana] (
     val title: String,
     val description: String,
     val unit: String,
-    val thresholds: List[(String, Option[Double])],
+    val thresholds: Thresholds,
     labels: Labels[L],
     filters: List[LabelMatch],
     private[grafana] val named: Boolean,
@@ -193,6 +194,8 @@ final class MetricStat[L] private[grafana] (
 
   def withUnit(next: String): MetricStat[L] = changed(unit = next)
 
+  def withThresholds(base: Color, steps: (Double, Color)*): MetricStat[L] = changed(thresholds = Thresholds(base, steps*))
+
   @publicInBinary private[grafana] def filtered(condition: LabelMatch): MetricStat[L] = changed(filters = filters :+ condition)
 
   private[grafana] def target: Either[GrafanaError, Target] =
@@ -202,6 +205,7 @@ final class MetricStat[L] private[grafana] (
       title: String = this.title,
       description: String = this.description,
       unit: String = this.unit,
+      thresholds: Thresholds = this.thresholds,
       filters: List[LabelMatch] = this.filters,
   ): MetricStat[L] = MetricStat(title, description, unit, thresholds, labels, filters, named, build)
 
@@ -211,23 +215,24 @@ object MetricStat:
   ): MetricStat[L] =
     MetricStat(title, description, unit, Stat.Green, labels, Nil, named, build)
 
-final class CustomStat private[grafana] (val title: String, val description: String, val unit: String, val thresholds: List[(String, Option[Double])], query: Target)
-    extends Stat:
+final class CustomStat private[grafana] (val title: String, val description: String, val unit: String, val thresholds: Thresholds, query: Target) extends Stat:
   def titled(next: String): CustomStat = CustomStat(next, description, unit, thresholds, query)
 
   def described(next: String): CustomStat = CustomStat(title, next, unit, thresholds, query)
 
   def withUnit(next: String): CustomStat = CustomStat(title, description, next, thresholds, query)
 
+  def withThresholds(base: Color, steps: (Double, Color)*): CustomStat = CustomStat(title, description, unit, Thresholds(base, steps*), query)
+
   private[grafana] def named: Boolean = false
 
   private[grafana] def target: Either[GrafanaError, Target] = Right(query)
 
 object Stat:
-  private[grafana] val Green = List("green" -> None)
+  private[grafana] val Green: Thresholds = Thresholds(Color.Green)
 
   val podsUp: Stat =
-    CustomStat("Pods up", "Scrape targets that answer (`up`).", "short", List("red" -> None, "green" -> Some(1.0)), Target(s"sum(${Query.selector("up")})", Set.empty))
+    CustomStat("Pods up", "Scrape targets that answer (`up`).", "short", Thresholds(Color.Red, 1.0 -> Color.Green), Target(s"sum(${Query.selector("up")})", Set.empty))
 
   def rate[V, L](counter: CounterDef[V, L]): MetricStat[L] =
     val series = s"${counter.name.value}_total"

@@ -373,6 +373,9 @@ dashboard.writeTo(Paths.get("metrics"))
   `Stat.quantile(histogram, 0.95)` is the stat, and `Stat.p95` its shorthand.
 * `Panel.share(counter)(_.result === CacheResult.Hit)` and `Stat.share(counter)(...)` draw the share of the counter's
   rate that matches, in `percentunit`.
+* `.withThresholds(Color.Green, 0.01 -> Color.Orange, 0.05 -> Color.Red)` colours a stat by its value: green below
+  1%, orange from 1%, red from 5%. The values must be finite and increasing, or `render` fails. A stat is green
+  otherwise, and `Stat.podsUp` is red below one pod.
 * `dashboard.missingSeries(definitions)` lists the series the dashboard's own panels and stats read that none of the
   definitions serves, such as a panel left behind by a renamed metric. One line in a test gives every service the
   check. The shared rows are left out: the library checks them against its own definitions.

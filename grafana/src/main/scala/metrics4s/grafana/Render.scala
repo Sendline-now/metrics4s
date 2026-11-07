@@ -23,7 +23,7 @@ private[grafana] object Render:
           .foldLeft[Either[GrafanaError, Vector[Json]]](Right(Vector.empty)) { (acc, stat) =>
             acc.flatMap { done =>
               val index = done.size
-              stat.target.flatMap { target =>
+              thresholdsOf(stat).flatMap(_ => stat.target).flatMap { target =>
                 validated(stat.title, List(target)).map(_ => done :+ statJson(stat, target, layout.id + index, (index % 6) * 4, layout.y + (index / 6) * 4))
               }
             }
@@ -52,6 +52,13 @@ private[grafana] object Render:
         case target if FixedWindow.findFirstIn(target.expr).isDefined => GrafanaError.FixedRateWindow(title, target.expr)
       }
         .toLeft(targets)
+
+  private def thresholdsOf(stat: Stat): Either[GrafanaError, Thresholds] =
+    val values = stat.thresholds.steps.map(_._1)
+
+    if values.forall(_.isFinite) && values.zip(values.drop(1)).forall(_ < _)
+    then Right(stat.thresholds)
+    else Left(GrafanaError.InvalidThresholds(stat.title, values))
 
   private def header(dashboard: Dashboard, panels: List[Json]): Json =
     obj(
@@ -160,7 +167,10 @@ private[grafana] object Render:
           "color"      -> obj("mode" -> str("thresholds")),
           "thresholds" -> obj(
             "mode"  -> str("absolute"),
-            "steps" -> Json.Arr(stat.thresholds.map((color, value) => obj("color" -> str(color), "value" -> value.fold(Json.Null)(num)))),
+            "steps" -> Json.Arr(
+              obj("color" -> str(stat.thresholds.base.value), "value" -> Json.Null) ::
+                stat.thresholds.steps.map((value, color) => obj("color" -> str(color.value), "value" -> num(value)))
+            ),
           ),
         ),
         "overrides" -> arr(),

@@ -286,6 +286,39 @@ final class DashboardSpec extends AnyWordSpec, Matchers:
     }
   }
 
+  "a stat with thresholds" should {
+    "colour itself from the base up through each step, and keep them through a filter and a new title" in {
+      def stepsOf(stat: Json): List[(String, Option[Double])] =
+        List("fieldConfig", "defaults", "thresholds", "steps").foldLeft(Option(stat))((acc, key) => acc.flatMap(_.field(key))) match
+          case Some(Json.Arr(steps)) => steps.map(step => string(step, "color") -> step.field("value").collect { case Json.Num(value) => value.toDouble })
+          case other                 => fail(s"no threshold steps in $other")
+
+      val errors = Stat.share(Definitions.processed)(_.outcome === Outcome.Error).withThresholds(Color.Green, 0.01 -> Color.Orange, 0.05 -> Color.Red)
+      val stats  = panelsOf(
+        dashboard(Stats(errors.where(_.source === Source.Kafka).titled("Kafka errors, share"), Stat.podsUp, Stat.gauge(Definitions.cacheSize))).json
+          .fold(error => fail(error.message), identity)
+      )
+
+      stats.map(stat => string(stat, "title") -> stepsOf(stat)) shouldBe List(
+        "Kafka errors, share"  -> List("green" -> None, "orange" -> Some(0.01), "red" -> Some(0.05)),
+        "Pods up"              -> List("red" -> None, "green" -> Some(1.0)),
+        "Entries in the cache" -> List("green" -> None),
+      )
+    }
+
+    "refuse values that do not increase, or are not finite" in {
+      (
+        dashboard(Stats(Stat.rate(Definitions.received).withThresholds(Color.Green, 10.0 -> Color.Red, 5.0 -> Color.Orange))).render,
+        dashboard(Stats(Stat.podsUp.withThresholds(Color.Red, 1.0 -> Color.Yellow, 1.0 -> Color.Green))).render,
+        dashboard(Stats(Stat.podsUp.withThresholds(Color.Red, Double.PositiveInfinity -> Color.Green))).render,
+      ) shouldBe (
+        Left(GrafanaError.InvalidThresholds("Received items, /s", List(10.0, 5.0))),
+        Left(GrafanaError.InvalidThresholds("Pods up", List(1.0, 1.0))),
+        Left(GrafanaError.InvalidThresholds("Pods up", List(Double.PositiveInfinity))),
+      )
+    }
+  }
+
   "a dashboard" should {
     "lay out stats six to a row, then a row header and panels two to a line, with unique ids" in {
       val json = dashboard(
