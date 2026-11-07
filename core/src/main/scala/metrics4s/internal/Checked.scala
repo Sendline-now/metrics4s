@@ -15,6 +15,8 @@ object Checked:
   inline def histogramSeconds(inline name: String): MetricName = ${ Macros.metricName('name, "histogram", "seconds") }
   inline def histogramBytes(inline name: String): MetricName   = ${ Macros.metricName('name, "histogram", "bytes") }
 
+  inline def info(inline name: String): MetricName = ${ Macros.metricName('name, "info", "") }
+
   inline def help(inline help: String): String = ${ Macros.help('help) }
 
   inline def labelName(inline name: String): String = ${ Macros.labelName('name) }

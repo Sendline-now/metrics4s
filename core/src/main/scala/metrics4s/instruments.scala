@@ -74,3 +74,13 @@ object HistogramOf:
     def observe(labels: L, value: V): Unit
 
     final def observe(value: V)(using labels: NoLabels =:= L): Unit = observe(labels(NoLabels), value)
+
+trait InfoOf[F[*], L]:
+  def definition: InfoDef[L]
+  def set(labels: L): F[Unit]
+  def unsafe: InfoOf.Unsafe[L]
+  def unregister: F[Unit]
+
+object InfoOf:
+  trait Unsafe[L]:
+    def set(labels: L): Unit

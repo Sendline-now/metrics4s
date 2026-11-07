@@ -13,6 +13,7 @@ trait Metrics[F[*]]:
   def register[V, L](definition: CounterDef[V, L]): F[CounterOf[F, V, L]]
   def register[V, L](definition: GaugeDef[V, L]): F[GaugeOf[F, V, L]]
   def register[V, L](definition: HistogramDef[V, L]): F[HistogramOf[F, V, L]]
+  def register[L](definition: InfoDef[L]): F[InfoOf[F, L]]
   def registerAll[T <: Tuple](definitions: T): F[Metrics.Instruments[F, T]]
 
   def observe[V, L](definition: ObservableDef[V, L])(report: Observer[V, L] => Unit): Allocated[F, Unit]
@@ -26,6 +27,7 @@ object Metrics:
     case CounterDef[v, l]   => CounterOf[F, v, l]
     case GaugeDef[v, l]     => GaugeOf[F, v, l]
     case HistogramDef[v, l] => HistogramOf[F, v, l]
+    case InfoDef[l]         => InfoOf[F, l]
 
   type Instruments[F[*], T <: Tuple] = Tuple.Map[T, [D] =>> Instrument[F, D]]
 

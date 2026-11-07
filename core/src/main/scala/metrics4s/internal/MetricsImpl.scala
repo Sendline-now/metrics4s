@@ -17,14 +17,17 @@ private[metrics4s] final class MetricsImpl[F[*]](val backend: MetricsBackend, co
   def register[V, L](definition: HistogramDef[V, L]): F[HistogramOf[F, V, L]] =
     raised(registerHistogram(definition))
 
+  def register[L](definition: InfoDef[L]): F[InfoOf[F, L]] =
+    raised(registerInfo(definition))
+
   def registerAll[T <: Tuple](definitions: T): F[Metrics.Instruments[F, T]] =
     raised {
-      val registered = definitions.productIterator.foldLeft[Either[MetricError, List[(Any, Series[?])]]](Right(Nil)) { (acc, definition) =>
+      val registered = definitions.productIterator.foldLeft[Either[MetricError, List[(Any, Registration)]]](Right(Nil)) { (acc, definition) =>
         acc.flatMap { done =>
           registerAny(definition) match
             case Right(instrument) => Right(instrument :: done)
             case Left(error)       =>
-              done.foreach((_, series) => series.unregister())
+              done.foreach((_, registration) => registration.unregister())
               Left(error)
         }
       }
@@ -50,11 +53,12 @@ private[metrics4s] final class MetricsImpl[F[*]](val backend: MetricsBackend, co
   private def raised[A](register: => Either[MetricError, A]): F[A] =
     F.flatMap(F.delay(register))(result => Effect.fromEither(result.left.map(_.toThrowable)))
 
-  private def registerAny(definition: Any): Either[MetricError, (Any, Series[?])] =
+  private def registerAny(definition: Any): Either[MetricError, (Any, Registration)] =
     definition.asMatchable match
       case counter: CounterDef[?, ?]     => registerCounter(counter).map(instrument => (instrument, instrument.series))
       case gauge: GaugeDef[?, ?]         => registerGauge(gauge).map(instrument => (instrument, instrument.series))
       case histogram: HistogramDef[?, ?] => registerHistogram(histogram).map(instrument => (instrument, instrument.series))
+      case info: InfoDef[?]              => registerInfo(info).map(instrument => (instrument, instrument.registration))
       case other                         => throw IllegalArgumentException(s"registerAll takes metric definitions, not $other")
 
   private def registerCounter[V, L](definition: CounterDef[V, L]): Either[MetricError, CounterImpl[F, V, L]] =
@@ -65,6 +69,12 @@ private[metrics4s] final class MetricsImpl[F[*]](val backend: MetricsBackend, co
 
   private def registerHistogram[V, L](definition: HistogramDef[V, L]): Either[MetricError, HistogramImpl[F, V, L]] =
     cellsOf(definition, definition.labels, backend.histogram(definition)).map(HistogramImpl(definition, _))
+
+  private def registerInfo[L](definition: InfoDef[L]): Either[MetricError, InfoImpl[F, L]] =
+    for
+      _      <- MetricsImpl.validateLabels(definition)
+      series <- MetricsImpl.attempt(definition)(backend.info(definition))
+    yield InfoImpl(definition, series)
 
   private def cellsOf[C, L](definition: MetricDef, labels: Labels[L], open: => Either[MetricError, Series[C]]): Either[MetricError, Cells[C, L]] =
     for

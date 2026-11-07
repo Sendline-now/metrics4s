@@ -21,6 +21,7 @@ object Definitions:
   val processTime = Histogram.seconds("processor_process_seconds", "Processing of one item", Buckets.Normal).labelled[ByOutcome]
   val cacheSize   = Gauge("processor_cache_entries", "Entries in the cache")
   val payload     = Histogram.bytes("processor_payload_bytes", "Size of a payload", Buckets(512, 4096, 65536))
+  val build       = Info("processor_build", "The build that runs").labelled[(source: Source)]
 
 final class DashboardSpec extends AnyWordSpec, Matchers:
   private val F = Query.Filter
@@ -104,6 +105,26 @@ final class DashboardSpec extends AnyWordSpec, Matchers:
         List(s"max(processor_cache_entries{$F})"           -> Some("processor_cache_entries")),
         List(s"sum(processor_cache_entries{$F})"           -> Some("processor_cache_entries")),
       )
+    }
+  }
+
+  "an info stat" should {
+    "count the series by the label it shows, and print that label rather than a number" in {
+      val stat   = panelsOf(dashboard(Stats(Stat.info(Definitions.build)(_.source))).json.fold(error => fail(error.message), identity)).head
+      val target = stat.field("targets") match
+        case Some(Json.Arr(first :: Nil)) => first
+        case other                        => fail(s"not one target: $other")
+
+      (string(target, "expr"), string(target, "legendFormat"), string(stat, "options", "textMode"), string(stat, "options", "graphMode")) shouldBe (
+        s"count by (source) (processor_build_info{$F})",
+        "{{source}}",
+        "name",
+        "none",
+      )
+    }
+
+    "read the series with _info added" in {
+      dashboard(Stats(Stat.info(Definitions.build)(_.source))).reads shouldBe Set("processor_build_info")
     }
   }
 
@@ -224,13 +245,14 @@ final class DashboardSpec extends AnyWordSpec, Matchers:
 
   "the README table" should {
     "list each metric under its exposed name, with its type, unit and label values" in {
-      MetricsDoc.markdown(Definitions.processed, Definitions.processTime, Definitions.cacheSize, Definitions.payload) shouldBe
+      MetricsDoc.markdown(Definitions.processed, Definitions.processTime, Definitions.cacheSize, Definitions.payload, Definitions.build) shouldBe
         """| Metric | Type | Labels | What |
           !|---|---|---|---|
           !| `processor_items_total` | counter | `outcome`: `ok`, `skipped`, `error`; `source`: `kafka`, `rabbit` | Processed items |
           !| `processor_process_seconds` | histogram, seconds | `outcome`: `ok`, `skipped`, `error`; `source`: `kafka`, `rabbit` | Processing of one item |
           !| `processor_cache_entries` | gauge |  | Entries in the cache |
           !| `processor_payload_bytes` | histogram, bytes |  | Size of a payload |
+          !| `processor_build_info` | info | `source`: `kafka`, `rabbit` | The build that runs |
           !""".stripMargin('!')
     }
   }

@@ -133,6 +133,7 @@ A definition is a value with no effect and no registry. It is checked when it is
 | `Gauge.seconds`, `Gauge.bytes` | end with the unit | `FiniteDuration`, `Long` | `<name>` |
 | `Histogram.seconds`, `Histogram.bytes` | end with the unit | `FiniteDuration`, `Long` | `_bucket`, `_sum`, `_count` |
 | `Histogram.sizes` | not end with `_seconds`, `_bytes` | `Long` | `_bucket`, `_sum`, `_count` |
+| `Info` | not end with `_seconds`, `_bytes` | its labels | `<name>_info`, always `1` |
 
 On top of that, every name is snake case with no `__`, help is never empty, and none of the suffixes the exposition
 adds (`_bucket`, `_count`, `_sum`, `_created`, `_info`, `_total`) can be written by hand. The compiler says why:
@@ -194,6 +195,17 @@ histogram.timedBy(fa)(result => if result.isRight then Outcome.Ok else Outcome.E
 counter.unsafe.inc(Outcome.Ok)             // Unit, for code outside F: driver listeners, interceptors
 counter.unregister
 ```
+
+An **info** carries facts rather than a number: the build's version, the stage, a configuration. Its series is always
+`1`, and its labels are what the dashboard shows. `set` replaces the previous labels, so a copy shows one series:
+
+```scala
+val build = Info("processor_build", "The build that runs").labelled[(version: Version, stage: Stage)]
+
+Metrics[IO].register(build).flatMap(_.set((version = Version(BuildInfo.version), stage = Stage.Prod)))
+```
+
+A version is not enumerable, so it is `LabelValue.bounded`. `Stat.info(build)(_.version)` shows it on a dashboard.
 
 For an enumerated label an update is an array read: faster than the raw client, see [BENCHMARKS.md](BENCHMARKS.md).
 

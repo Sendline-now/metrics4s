@@ -9,6 +9,7 @@ enum MetricKind(val value: String):
   case Counter   extends MetricKind("counter")
   case Gauge     extends MetricKind("gauge")
   case Histogram extends MetricKind("histogram")
+  case Info      extends MetricKind("info")
 
 enum MetricUnit(val value: String):
   case Seconds extends MetricUnit("seconds")
@@ -110,6 +111,19 @@ object HistogramDef:
   @publicInBinary private[metrics4s] def sizes(name: MetricName, help: String, buckets: Buckets): HistogramDef[Long, NoLabels] =
     HistogramDef(name, help, None, buckets, Labels.none, true, Recorded.long)
 
+final class InfoDef[L] private (val name: MetricName, val help: String, val labels: Labels[L]) extends MetricDef:
+  def kind: MetricKind                                  = MetricKind.Info
+  def unit: Option[MetricUnit]                          = None
+  def labelNames: IArray[String]                        = labels.names
+  def labelDomains: IArray[Option[IArray[String]]]      = labels.domains
+  def preCreated: Boolean                               = false
+  def labelled[L2](using next: Labels[L2]): InfoDef[L2] = InfoDef(name, help, next)
+  override def toString: String                         = s"InfoDef(${name.value})"
+
+object InfoDef:
+  @publicInBinary private[metrics4s] def plain(name: MetricName, help: String): InfoDef[NoLabels] =
+    InfoDef(name, help, Labels.none)
+
 object Counter:
   inline def apply(inline name: String, inline help: String): CounterDef[Long, NoLabels] =
     CounterDef.plain(Checked.counter(name), Checked.help(help))
@@ -139,3 +153,7 @@ object Histogram:
 
   inline def sizes(inline name: String, inline help: String, buckets: Buckets): HistogramDef[Long, NoLabels] =
     HistogramDef.sizes(Checked.histogramSizes(name), Checked.help(help), buckets)
+
+object Info:
+  inline def apply(inline name: String, inline help: String): InfoDef[NoLabels] =
+    InfoDef.plain(Checked.info(name), Checked.help(help))

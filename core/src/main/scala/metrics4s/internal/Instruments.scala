@@ -71,3 +71,14 @@ private[metrics4s] final class HistogramImpl[F[*], V, L](val definition: Histogr
         F.flatMap(recorded)(_ => Effect.fromEither(result))
       }
     }
+
+private[metrics4s] final class InfoImpl[F[*], L](val definition: InfoDef[L], series: InfoSeries)(using F: Effect[F]) extends InfoOf[F, L]:
+
+  private[metrics4s] def registration: Registration = series
+
+  val unsafe: InfoOf.Unsafe[L] = new InfoOf.Unsafe[L]:
+    def set(labels: L): Unit = series.set(definition.labels.render(labels))
+
+  def set(labels: L): F[Unit] = F.delay(unsafe.set(labels))
+
+  def unregister: F[Unit] = F.delay(series.unregister())

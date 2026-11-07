@@ -63,11 +63,13 @@ object Naming:
         else Left(s"must end with _${expected.value}")
       case None           =>
         MetricUnit.values.find(candidate => name.endsWith(s"_${candidate.value}")) match
-          case Some(candidate) => Left(s"must not end with _${candidate.value}: use ${constructorOf(kind)}.${candidate.value}, which records the unit")
-          case None            => Right(())
+          case Some(candidate) if kind == MetricKind.Info => Left(s"must not end with _${candidate.value}: an info metric carries no unit")
+          case Some(candidate)                            => Left(s"must not end with _${candidate.value}: use ${constructorOf(kind)}.${candidate.value}, which records the unit")
+          case None                                       => Right(())
 
   private def constructorOf(kind: MetricKind): String =
     kind match
       case MetricKind.Counter   => "Counter"
       case MetricKind.Gauge     => "Gauge"
       case MetricKind.Histogram => "Histogram"
+      case MetricKind.Info      => "Info"

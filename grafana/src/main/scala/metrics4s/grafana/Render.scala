@@ -165,11 +165,11 @@ private[grafana] object Render:
       ),
       "options"     -> obj(
         "reduceOptions" -> obj("calcs" -> arr(str("lastNotNull")), "fields" -> str(""), "values" -> bool(false)),
-        "colorMode"     -> str("value"),
-        "graphMode"     -> str("area"),
-        "textMode"      -> str("auto"),
+        "colorMode"     -> str(if stat.named then "none" else "value"),
+        "graphMode"     -> str(if stat.named then "none" else "area"),
+        "textMode"      -> str(if stat.named then "name" else "auto"),
       ),
-      "targets"     -> arr(targetJson(stat.target, 0, legend = false)),
+      "targets"     -> arr(targetJson(stat.target, 0, legend = stat.named)),
     )
 
   private def timeseriesJson(panel: Panel, targets: List[Target], id: Int, x: Int, y: Int): Json =

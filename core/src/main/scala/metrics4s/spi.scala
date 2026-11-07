@@ -4,6 +4,7 @@ trait MetricsBackend:
   def counter(definition: CounterDef[?, ?]): Either[MetricError, Series[CounterCell]]
   def gauge(definition: GaugeDef[?, ?]): Either[MetricError, Series[GaugeCell]]
   def histogram(definition: HistogramDef[?, ?]): Either[MetricError, Series[HistogramCell]]
+  def info(definition: InfoDef[?]): Either[MetricError, InfoSeries] = Left(MetricError.Rejected(definition.name, "this backend has no info metrics"))
   def observe(definitions: IArray[ObservableDef[?, ?]], collect: ObservedValues => Unit): Either[MetricError, Registration]
 
 trait Registration:
@@ -25,3 +26,6 @@ trait HistogramCell:
 
 trait ObservedValues:
   def report(definition: Int, labelValues: IArray[String], value: Double): Unit
+
+trait InfoSeries extends Registration:
+  def set(labelValues: IArray[String]): Unit

@@ -1,6 +1,6 @@
 package metrics4s.grafana
 
-import metrics4s.{CounterDef, GaugeDef, HistogramDef, MetricDef, MetricUnit}
+import metrics4s.{CounterDef, GaugeDef, HistogramDef, InfoDef, MetricDef, MetricUnit}
 
 enum Pods:
   case Each, Sum, Max
@@ -126,8 +126,15 @@ object Panel:
       case Some(MetricUnit.Bytes)   => "bytes"
       case None                     => "short"
 
-final class Stat private[grafana] (val title: String, val description: String, val unit: String, val target: Target, val thresholds: List[(String, Option[Double])]):
-  def titled(next: String): Stat = Stat(next, description, unit, target, thresholds)
+final class Stat private[grafana] (
+    val title: String,
+    val description: String,
+    val unit: String,
+    val target: Target,
+    val thresholds: List[(String, Option[Double])],
+    val named: Boolean = false,
+):
+  def titled(next: String): Stat = Stat(next, description, unit, target, thresholds, named)
 
 object Stat:
   private val Green = List("green" -> None)
@@ -161,6 +168,19 @@ object Stat:
       Green
     )
 
+  inline def info[L](info: InfoDef[L])(inline field: L => Any): Stat = infoBy(info, LabelSelector.name(field))
+
+  def infoBy(info: InfoDef[?], label: String): Stat =
+    val series = s"${info.name.value}_info"
+    Stat(
+      info.help,
+      s"`$series`: ${info.help}, `$label` shown.",
+      "none",
+      Target(s"count by ($label) (${Query.selector(series)})", s"{{$label}}", Set(series)),
+      Green,
+      named = true,
+    )
+
   def custom(title: String, unit: String, description: String)(target: Target): Stat = Stat(title, description, unit, target, Green)
 
 sealed trait Section
@@ -180,3 +200,4 @@ private[grafana] def seriesOf(definition: MetricDef): Set[String] =
     case counter: CounterDef[?, ?]     => Set(s"${counter.name.value}_total")
     case gauge: GaugeDef[?, ?]         => Set(gauge.name.value)
     case histogram: HistogramDef[?, ?] => Set("_bucket", "_sum", "_count").map(histogram.name.value + _)
+    case info: InfoDef[?]              => Set(s"${info.name.value}_info")

@@ -70,6 +70,18 @@ final class NamingSpec extends AnyWordSpec, Matchers:
       )
     }
 
+    "not compile with an info metric named _info or carrying a unit" in {
+      (
+        errorsOf(typeCheckErrors("""Info("processor_build_info", "The build")""")),
+        errorsOf(typeCheckErrors("""Info("processor_uptime_seconds", "The build")""")),
+        Info("processor_build", "The build").name.value,
+      ) shouldBe (
+        List("Invalid metric name \"processor_build_info\": it must not end with _info, which the exposition format adds itself"),
+        List("Invalid metric name \"processor_uptime_seconds\": it must not end with _seconds: an info metric carries no unit"),
+        "processor_build",
+      )
+    }
+
     "not compile without help, nor with a name that is not a literal" in {
       (
         errorsOf(typeCheckErrors("""Counter("processor_items", "  ")""")),

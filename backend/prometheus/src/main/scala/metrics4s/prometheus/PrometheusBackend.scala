@@ -7,7 +7,7 @@ import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
 import io.prometheus.metrics.core.datapoints.{CounterDataPoint, DistributionDataPoint, GaugeDataPoint}
-import io.prometheus.metrics.core.metrics.{Counter as PrometheusCounter, Gauge as PrometheusGauge, Histogram as PrometheusHistogram}
+import io.prometheus.metrics.core.metrics.{Counter as PrometheusCounter, Gauge as PrometheusGauge, Histogram as PrometheusHistogram, Info as PrometheusInfo}
 import io.prometheus.metrics.model.registry.{Collector, MetricType, MultiCollector, PrometheusRegistry}
 import io.prometheus.metrics.model.snapshots.{Labels as PrometheusLabels, Unit as PrometheusUnit, *}
 
@@ -64,6 +64,20 @@ final class PrometheusBackend(val registry: PrometheusRegistry) extends MetricsB
         new HistogramCell:
           def observe(value: Double): Unit = point.observe(value)
       }
+    }
+
+  override def info(definition: InfoDef[?]): Either[MetricError, InfoSeries] =
+    PrometheusBackend.registering(definition) {
+      val info = PrometheusInfo
+        .builder()
+        .name(definition.name.value)
+        .help(definition.help)
+        .labelNames(definition.labelNames.toSeq*)
+        .register(registry)
+
+      new InfoSeries:
+        def set(labelValues: IArray[String]): Unit = info.setLabelValues(labelValues.toSeq*)
+        def unregister(): Unit                     = registry.unregister(info)
     }
 
   def observe(definitions: IArray[ObservableDef[?, ?]], collect: ObservedValues => Unit): Either[MetricError, Registration] =

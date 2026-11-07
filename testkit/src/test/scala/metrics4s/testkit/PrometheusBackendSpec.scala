@@ -23,6 +23,7 @@ final class PrometheusBackendSpec extends AnyWordSpec, Matchers:
   private val processTime = Histogram.seconds("processor_process_seconds", "Processing of one item", Buckets(0.1, 0.5, 1))
   private val providers   = Gauge("processor_provider_entries", "Entries by provider").labelled[Provider]
   private val cacheSize   = Gauge("processor_cache_entries", "Entries in the cache")
+  private val release     = Info("processor_build", "The build that runs").labelled[(provider: Provider, outcome: Outcome)]
 
   private def failure(fa: Eval[?]): Option[MetricError] =
     Eval.attempt(fa).left.toOption.collect { case error: MetricException => error.error }
@@ -103,6 +104,21 @@ final class PrometheusBackendSpec extends AnyWordSpec, Matchers:
       ) shouldBe (
         Some(MetricError.AlreadyRegistered(received.name)),
         Some("Rejected"),
+      )
+    }
+
+    "expose an info metric as one series named with _info, its labels replaced by the next set" in {
+      val testkit = MetricsTestkit()
+      val build   = Eval.run(testkit.metrics[Eval].register(release))
+      val before  = testkit.series.keySet.filter(_.startsWith("processor_build"))
+
+      Eval.run(build.set((provider = Provider("cns"), outcome = Outcome.Ok)))
+      Eval.run(build.set((provider = Provider("lsports"), outcome = Outcome.Ok)))
+
+      (before, testkit.series.filter(_._1.startsWith("processor_build")), testkit.labelValues(release)) shouldBe (
+        Set.empty,
+        Map("""processor_build_info{outcome="ok",provider="lsports"}""" -> 1.0),
+        Set(List("lsports", "ok")),
       )
     }
 
