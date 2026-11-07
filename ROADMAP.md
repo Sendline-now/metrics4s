@@ -21,11 +21,12 @@ reasoning behind each module is in [DESIGN.md](DESIGN.md).
 | `http`, `http4s`, `tapir`, `sttp`, `mongo` | done |
 | From the Sendline backend: info metrics, `Measured`, `registerAs`, the exporter's port in its error, the integrations' definitions on their companions | done |
 | From the Sendline backend, in `grafana`: typed filters, one quantile, shares, `missingSeries(definitions)` | done |
+| Stats filtered by `.where` and coloured by thresholds; Java 17 class files; the README and the recipes compiled | done |
 
 **Done means**, and where each item stands:
 
 * Every module has specs that check real values read from a real registry, not only that a series exists. **Done:**
-  165 tests, plus 7 integration tests.
+  170 tests, plus 16 integration tests.
 * The four `Effect` instances pass one shared `EffectSuite`. **Done.**
 * The runtime metrics export exactly the names, types and labels commons exports, and a spec compares them. **Done.**
 * The shared dashboard rows read only series the runtime metrics and the JVM export. **Done**, checked by
@@ -33,6 +34,8 @@ reasoning behind each module is in [DESIGN.md](DESIGN.md).
 * A generated dashboard imports into Grafana and every panel's queries return data from Prometheus. **Done**, against
   Grafana 12 and Prometheus 3.5 in Docker.
 * `BENCHMARKS.md` has the hot-path numbers against the raw client. **Done.**
+* Every Scala block of the README and the recipes compiles, and the recipes run. **Done**, checked by `DocsItSpec`
+  and `RecipesItSpec`.
 * README, DESIGN, CHANGELOG, COMPATIBILITY, CONTRIBUTING and SECURITY in the `mongo4s` format. **Done.**
 * The descriptions and merger dashboards are regenerated from definitions and diffed panel by panel against the
   hand-written ones. **Partly done.** The shared cats-effect and JVM rows are diffed and pinned by a spec. The services'
@@ -47,7 +50,7 @@ reasoning behind each module is in [DESIGN.md](DESIGN.md).
 | --- | --- | --- |
 | **OpenTelemetry backend** | Nobody needs it yet. It also brings a naming question that only a real OTel pipeline can answer, because OTel adds suffixes of its own. The SPI is kept free of Prometheus so the backend can arrive without a break. | The Prometheus backend. |
 | **rapid runtime metrics** | rapid 2.9.9 has no hook to install a `TaskMonitor`. | JVM metrics; propose the hook upstream. |
-| **Alert rules from definitions** | The same definitions could produce `PrometheusRule` YAML (error ratio, p99 over a threshold, CPU starvation). It needs a threshold model first. | Rules written by hand. |
+| **Alert rules from definitions** | The same definitions could produce `PrometheusRule` YAML (error ratio, p99 over a threshold, CPU starvation). Stats have thresholds now; a rule also needs a duration and a severity. | Rules written by hand. |
 | **Exemplars** | A trace id on a bucket needs a tracing integration, which none of the runtimes share. | None. |
 | **A `/metrics` route for http4s and tapir** | The exporter's own server covers the services today. | `PrometheusScrape.text(registry)` in a route of your own. |
 | **Pushing dashboards to Grafana** | Importing by hand works, and an API client is a separate concern. | Dashboards → Import; the fixed `uid` overwrites. |
