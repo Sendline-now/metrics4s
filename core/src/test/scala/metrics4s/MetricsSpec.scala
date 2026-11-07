@@ -2,8 +2,13 @@ package metrics4s
 
 import java.util.concurrent.atomic.AtomicInteger
 
+import scala.concurrent.duration.FiniteDuration
+import scala.compiletime.testing.typeCheckErrors
+
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+
+import metrics4s.MetricsSpec.Processing
 
 import scala.concurrent.duration.given
 import metrics4s.Eval.given
@@ -130,6 +135,34 @@ final class MetricsSpec extends AnyWordSpec, Matchers:
         false,
         true,
       )
+    }
+  }
+
+  "registering into a case class" should {
+    "fill each field with the instrument of the definition named after it" in withMetrics() { (metrics, backend) =>
+      val processing = Eval.run(metrics.registerAs[Processing]((items = processed, time = processTime, cache = cacheSize)))
+
+      Eval.run(processing.items.inc(Outcome.Ok))
+      Eval.run(processing.time.observe(2.seconds))
+      Eval.run(processing.cache.set(7))
+
+      (backend.series("processor_items")(List("ok")), backend.observed("processor_process_seconds"), backend.series("processor_cache_entries")) shouldBe (
+        1.0,
+        Some(Vector(2.0)),
+        Map(Nil -> 7.0),
+      )
+    }
+
+    "refuse to compile definitions named or ordered otherwise than the fields, or registering as another instrument" in withMetrics() { (metrics, _) =>
+      val named = "Name the definitions after the fields of the case class they fill, in their order, as in (requests = requestsDef, duration = durationDef)"
+      val typed = "Give each field of the case class the type of the instrument its definition registers as"
+
+      (
+        typeCheckErrors("metrics.registerAs[Processing]((items = processed, cache = cacheSize, time = processTime))").map(_.message),
+        typeCheckErrors("metrics.registerAs[Processing]((items = processed, time = processTime, entries = cacheSize))").map(_.message),
+        typeCheckErrors("metrics.registerAs[Processing]((processed, processTime, cacheSize))").map(_.message),
+        typeCheckErrors("metrics.registerAs[Processing]((items = received, time = processTime, cache = cacheSize))").map(_.message),
+      ) shouldBe (List(named), List(named), List(named), List(typed))
     }
   }
 
@@ -365,3 +398,6 @@ final class MetricsSpec extends AnyWordSpec, Matchers:
       )
     }
   }
+
+object MetricsSpec:
+  final case class Processing(items: CounterOf[Eval, Long, Outcome], time: HistogramOf[Eval, FiniteDuration, NoLabels], cache: GaugeOf[Eval, Double, NoLabels])

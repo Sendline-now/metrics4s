@@ -1,6 +1,9 @@
 package metrics4s
 
+import scala.deriving.Mirror
+import scala.NamedTuple.NamedTuple
 import scala.annotation.implicitNotFound
+import scala.compiletime.{error, summonFrom}
 import scala.concurrent.duration.FiniteDuration
 
 import metrics4s.internal.MetricsImpl
@@ -21,6 +24,16 @@ trait Metrics[F[*]]:
   def observeAllF[S](read: F[S], timeout: FiniteDuration)(observations: Observation[S]*)(using Dispatch[F]): Allocated[F, Unit]
 
   def backend: MetricsBackend
+
+  inline def registerAs[P](using mirror: Mirror.ProductOf[P])[N <: Tuple, V <: Tuple](definitions: NamedTuple[N, V])(using F: Effect[F]): F[P] =
+    summonFrom {
+      case _: (N =:= mirror.MirroredElemLabels) =>
+        summonFrom {
+          case _: (Metrics.Instruments[F, V] <:< mirror.MirroredElemTypes) => F.map(registerAll(definitions.toTuple))(mirror.fromProduct)
+          case _                                                           => error("Give each field of the case class the type of the instrument its definition registers as")
+        }
+      case _                                    => error("Name the definitions after the fields of the case class they fill, in their order, as in (requests = requestsDef, duration = durationDef)")
+    }
 
 object Metrics:
   type Instrument[F[*], D] = D match
