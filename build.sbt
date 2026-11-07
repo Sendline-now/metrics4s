@@ -29,9 +29,9 @@ lazy val sourceLevel = settingKey[String]("Scala -source level the build compile
 
 lazy val commonSettings = Seq(
   organization           := "now.sendline",
-  organizationName       := "Sendline.now",
-  organizationHomepage   := Some(uri("https://github.com/Sendline-now")),
-  homepage               := Some(uri("https://github.com/Sendline-now/metrics4s")),
+  organizationName       := "Sendline",
+  organizationHomepage   := Some(uri("https://oss.sendline.now/")),
+  homepage               := Some(uri("https://oss.sendline.now/metrics4s/")),
   description            := "Typed, effect-agnostic metrics for Scala 3 on the Prometheus Java client",
   version                := "0.2.0",
   versionScheme          := Some("semver-spec"),
@@ -44,8 +44,8 @@ lazy val commonSettings = Seq(
   publishTo              := localStaging.value,
   scmInfo                := Some(
     ScmInfo(
-      uri("https://github.com/Sendline-now/metrics4s"),
-      "git@github.com:Sendline-now/metrics4s.git",
+      uri("https://github.com/sendline-now/metrics4s"),
+      "git@github.com:sendline-now/metrics4s.git",
     )
   ),
   developers             := List(

@@ -644,7 +644,9 @@ Decided on 2026-11-07:
   hook is to be proposed upstream, and until then a rapid service has the JVM metrics. The item is on the
   [roadmap](ROADMAP.md#wanted-not-yet-scheduled).
 * **Coordinates:** the artifacts are published as `now.sendline` on Maven Central, and the repository is
-  [Sendline-now/metrics4s](https://github.com/Sendline-now/metrics4s). The package stays `metrics4s`.
+  [sendline-now/metrics4s](https://github.com/sendline-now/metrics4s). The package stays `metrics4s`. The homepage in
+  the POM is [oss.sendline.now/metrics4s](https://oss.sendline.now/metrics4s/), the site Sendline's libraries share.
+  It is built in its own repository from this README and the files it links, so this one has no site of its own.
 * **The first public release is `0.2.0`.** `0.1.0` was only tested inside Sendline.now. The default branch is `main`.
 
 Decided on 2026-11-04:

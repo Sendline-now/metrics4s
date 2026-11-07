@@ -100,6 +100,9 @@ through the instruments' `unsafe` side, so they need no effect. Add a dashboard 
   `DocsItSpec` fails on a block that matches no example, whitespace aside, and on a dependency line whose version is
   not the one `build.sbt` publishes. `RecipesItSpec` runs the recipes that do something. Change the example and the
   block together.
+- There is no documentation site in this repository. [oss.sendline.now/metrics4s](https://oss.sendline.now/metrics4s/)
+  is built in its own repository from [README.md](README.md) and the files it links, so link between them with
+  relative paths.
 - Numbers in [BENCHMARKS.md](BENCHMARKS.md) come from `sbt "benchmarks/Jmh/run"`; rerun it when the hot path changes.
 
 ## Code style
@@ -126,12 +129,13 @@ nothing, which is Kyo's to fix.
 3. Sign and stage the artifacts, then upload them to Maven Central and release them:
 
    ```bash
-   sbt publishSigned
-   sbt sonaRelease
+   rm -rf target/sona-staging
+   sbt "publishSigned; sonaRelease"
    ```
 
    `publishSigned` writes the signed artifacts to `target/sona-staging`, which is what `publishTo` points at;
-   `sonaRelease` uploads that bundle with the credentials from `~/.sbt/sonatype_credentials` and publishes it.
+   `sonaRelease` uploads that bundle with the credentials from `~/.sbt/sonatype_credentials` and publishes it. It
+   uploads whatever the directory holds, so clear it first, or an earlier run's artifacts go along.
 4. Tag the release, `v<version>`, and write the GitHub release notes from the changelog section.
 
 From `1.0.0` two more steps apply, and nothing fails when they are missed:

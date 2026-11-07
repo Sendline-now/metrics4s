@@ -11,7 +11,7 @@ Typed, effect-agnostic metrics for `Scala 3` on the native Prometheus Java clien
 or `Kyo`: the runtime (`cats-effect` / `ZIO` / `Kyo` / `rapid`) and the backend are modules wired in through a `given`,
 and `core` depends on nothing.
 
-[![CI](https://github.com/Sendline-now/metrics4s/actions/workflows/ci.yml/badge.svg)](https://github.com/Sendline-now/metrics4s/actions/workflows/ci.yml)
+[![CI](https://github.com/sendline-now/metrics4s/actions/workflows/ci.yml/badge.svg)](https://github.com/sendline-now/metrics4s/actions/workflows/ci.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/now.sendline/metrics4s-core_3?color=blue)](https://central.sonatype.com/search?q=g:now.sendline%20metrics4s)
 [![Scala 3](https://img.shields.io/badge/Scala-3-blue)](https://www.scala-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)

@@ -41,7 +41,7 @@ reasoning behind each module is in [DESIGN.md](DESIGN.md).
   hand-written ones. **Partly done.** The shared cats-effect and JVM rows are diffed and pinned by a spec. The services'
   own rows need their metric definitions, which belong in those services once they move to `metrics4s`.
 * The coordinates are settled and the first release is published. **Partly done.** The artifacts are `now.sendline`
-  and the repository is [Sendline-now/metrics4s](https://github.com/Sendline-now/metrics4s), decided on 2026-11-07.
+  and the repository is [sendline-now/metrics4s](https://github.com/sendline-now/metrics4s), decided on 2026-11-07.
   Nothing is published yet; the first release is `0.2.0`.
 
 ## Wanted, not yet scheduled
