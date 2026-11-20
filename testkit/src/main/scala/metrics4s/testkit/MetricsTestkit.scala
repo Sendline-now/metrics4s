@@ -43,6 +43,11 @@ final class MetricsTestkit private (val registry: PrometheusRegistry):
 
   def histogram[V](definition: HistogramDef[V, NoLabels]): Option[HistogramValue] = histogram(definition, NoLabels)
 
+  def info[L](definition: InfoDef[L]): Option[Map[String, String]] =
+    snapshotOf(definition).flatMap(_.getDataPoints.asScala.headOption).map { point =>
+      definition.labelNames.toList.map(name => name -> point.getLabels.get(name)).toMap
+    }
+
   def labelValues(definition: MetricDef): Set[List[String]] =
     snapshotOf(definition).toList.flatMap(_.getDataPoints.asScala.map(point => definition.labelNames.toList.map(point.getLabels.get))).toSet
 

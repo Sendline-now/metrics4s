@@ -25,7 +25,7 @@ final class PrometheusBackend(val registry: PrometheusRegistry) extends MetricsB
         .labelNames(definition.labelNames.toSeq*)
         .register(registry)
 
-      PrometheusBackend.series[CounterCell, CounterDataPoint](registry, counter, counter.labelValues(_*), counter.remove(_*)) { point =>
+      PrometheusBackend.series[CounterCell, CounterDataPoint](registry, definition, counter, counter.labelValues(_*), counter.remove(_*)) { point =>
         new CounterCell:
           def add(amount: Double): Unit = point.inc(amount)
       }
@@ -41,7 +41,7 @@ final class PrometheusBackend(val registry: PrometheusRegistry) extends MetricsB
         .labelNames(definition.labelNames.toSeq*)
         .register(registry)
 
-      PrometheusBackend.series[GaugeCell, GaugeDataPoint](registry, gauge, gauge.labelValues(_*), gauge.remove(_*)) { point =>
+      PrometheusBackend.series[GaugeCell, GaugeDataPoint](registry, definition, gauge, gauge.labelValues(_*), gauge.remove(_*)) { point =>
         new GaugeCell:
           def set(value: Double): Unit = point.set(value)
           def add(delta: Double): Unit = point.inc(delta)
@@ -60,7 +60,7 @@ final class PrometheusBackend(val registry: PrometheusRegistry) extends MetricsB
         .classicUpperBounds(definition.buckets.bounds.toSeq*)
         .register(registry)
 
-      PrometheusBackend.series[HistogramCell, DistributionDataPoint](registry, histogram, histogram.labelValues(_*), histogram.remove(_*)) { point =>
+      PrometheusBackend.series[HistogramCell, DistributionDataPoint](registry, definition, histogram, histogram.labelValues(_*), histogram.remove(_*)) { point =>
         new HistogramCell:
           def observe(value: Double): Unit = point.observe(value)
       }
@@ -114,6 +114,7 @@ object PrometheusBackend:
     unit match
       case Some(MetricUnit.Seconds) => PrometheusUnit.SECONDS
       case Some(MetricUnit.Bytes)   => PrometheusUnit.BYTES
+      case Some(MetricUnit.Ratio)   => PrometheusUnit.RATIO
       case None                     => null
 
   private def registering[A](definition: MetricDef)(body: => A): Either[MetricError, A] =
@@ -126,11 +127,16 @@ object PrometheusBackend:
       case NonFatal(error)                                                                                         =>
         Left(MetricError.BackendFailure(definition.name, error))
 
-  private def series[C, D](registry: PrometheusRegistry, collector: Collector, point: Array[String] => D, drop: Array[String] => Unit)(wrap: D => C): Series[C] =
+  private def series[C, D](registry: PrometheusRegistry, definition: MetricDef, collector: Collector, point: Array[String] => D, drop: Array[String] => Unit)(
+      wrap: D => C
+  ): Series[C] =
     new Series[C]:
       def cell(labelValues: IArray[String]): C      = wrap(point(labelValues.asInstanceOf[Array[String]]))
       def remove(labelValues: IArray[String]): Unit = drop(labelValues.asInstanceOf[Array[String]])
       def unregister(): Unit                        = registry.unregister(collector)
+
+      def labelValues: Iterable[IArray[String]] =
+        collector.collect().getDataPoints.asScala.map(point => definition.labelNames.map(point.getLabels.get)).toList
 
   private final class ObservedCollector(definitions: IArray[ObservableDef[?, ?]], reader: ObservedValues => Unit, failures: CounterDataPoint) extends MultiCollector:
 

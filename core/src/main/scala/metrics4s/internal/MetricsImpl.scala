@@ -20,7 +20,7 @@ private[metrics4s] final class MetricsImpl[F[*]](val backend: MetricsBackend, co
   def register[L](definition: InfoDef[L]): F[InfoOf[F, L]] =
     raised(registerInfo(definition))
 
-  def registerAll[T <: Tuple](definitions: T): F[Metrics.Instruments[F, T]] =
+  def registerAll[T <: Tuple](definitions: T)(using Tuple.Union[T] <:< MetricDef): F[Metrics.Instruments[F, T]] =
     raised {
       val registered = definitions.productIterator.foldLeft[Either[MetricError, List[(Any, Registration)]]](Right(Nil)) { (acc, definition) =>
         acc.flatMap { done =>
@@ -132,9 +132,19 @@ private[metrics4s] object MetricsImpl:
     invalid.headOption.orElse(duplicated).orElse(clashing.headOption).toLeft(())
 
   private[internal] def precreation[L](definition: MetricDef, labels: Labels[L], config: MetricsConfig): Either[MetricError, Option[Int]] =
-    labels.size match
-      case Some(size) if definition.preCreated =>
-        if size > config.preCreateLimit
-        then Left(MetricError.DomainTooLarge(definition.name, size, config.preCreateLimit))
-        else Right(Some(size.toInt))
-      case _                                   => Right(None)
+    labels.size.filter(_ => definition.preCreation != PreCreation.Never) match
+      case None               => Right(None)
+      case Some(combinations) =>
+        val each   = seriesEach(definition)
+        val series = if combinations > Long.MaxValue / each then Long.MaxValue else combinations * each
+
+        if series <= config.preCreateLimit then Right(Some(combinations.toInt))
+        else if definition.preCreation == PreCreation.WithinLimit then Right(None)
+        else
+          val domains = definition.labelNames.toList.zip(definition.labelDomains.toList.map(_.fold(0)(_.length)))
+          Left(MetricError.DomainTooLarge(definition.name, domains, each, series, config.preCreateLimit))
+
+  private def seriesEach(definition: MetricDef): Int =
+    definition match
+      case histogram: HistogramDef[?, ?] => histogram.buckets.bounds.length + 3
+      case _                             => 1

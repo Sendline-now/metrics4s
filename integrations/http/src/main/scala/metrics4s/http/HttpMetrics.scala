@@ -1,5 +1,7 @@
 package metrics4s.http
 
+import java.util.HashMap
+
 import scala.concurrent.duration.{FiniteDuration, NANOSECONDS}
 
 import metrics4s.*
@@ -20,7 +22,6 @@ enum StatusClass(val value: String):
   case Redirection   extends StatusClass("3xx")
   case ClientError   extends StatusClass("4xx")
   case ServerError   extends StatusClass("5xx")
-  case Failed        extends StatusClass("failed")
 
 object StatusClass:
   given LabelValue[StatusClass] = LabelValue.enumerated(StatusClass.values)(_.value)
@@ -33,8 +34,30 @@ object StatusClass:
       case 4 => ClientError
       case _ => ServerError
 
+enum ClientStatus(val value: String):
+  case Informational extends ClientStatus("1xx")
+  case Success       extends ClientStatus("2xx")
+  case Redirection   extends ClientStatus("3xx")
+  case ClientError   extends ClientStatus("4xx")
+  case ServerError   extends ClientStatus("5xx")
+  case Failed        extends ClientStatus("failed")
+
+object ClientStatus:
+  given LabelValue[ClientStatus] = LabelValue.enumerated(ClientStatus.values)(_.value)
+
+  def of(code: Int): ClientStatus = of(StatusClass.of(code))
+
+  def of(status: StatusClass): ClientStatus =
+    status match
+      case StatusClass.Informational => Informational
+      case StatusClass.Success       => Success
+      case StatusClass.Redirection   => Redirection
+      case StatusClass.ClientError   => ClientError
+      case StatusClass.ServerError   => ServerError
+
 final class HttpServerMetrics private (val routes: List[Route]):
-  private val known = routes.toSet
+  private val known = HashMap[String, Route]()
+  routes.foreach(route => known.put(route.template, route): Unit)
 
   private given LabelValue[Route] = LabelValue.enumerated(routes :+ Route.Unmatched)(_.template)
 
@@ -46,7 +69,7 @@ final class HttpServerMetrics private (val routes: List[Route]):
 
   val definitions: List[MetricDef] = List(requests, duration, inFlight)
 
-  def route(template: Option[String]): Route = template.map(Route(_)).filter(known).getOrElse(Route.Unmatched)
+  def route(template: Option[String]): Route = template.fold(Route.Unmatched)(known.getOrDefault(_, Route.Unmatched))
 
   def register[F[*]](using metrics: Metrics[F], F: Effect[F]): F[HttpServerRecorder] =
     F.map(metrics.registerAll((requests, duration, inFlight)))((requests, duration, inFlight) =>
@@ -75,23 +98,24 @@ final class HttpServerRecorder private[http] (
     inFlight: GaugeOf.Unsafe[Double, NoLabels],
 ):
   def start(): Long =
-    inFlight.inc(NoLabels)
+    inFlight.inc()
     System.nanoTime()
 
   def finish(started: Long, route: Route, status: StatusClass): Unit =
-    inFlight.dec(NoLabels)
+    inFlight.dec()
     requests.inc((route = route, status = status))
     duration.observe((route = route), FiniteDuration(System.nanoTime() - started, NANOSECONDS))
 
-  def abandon(): Unit = inFlight.dec(NoLabels)
+  def abandon(): Unit = inFlight.dec()
 
 final class HttpClientMetrics private (val operations: List[Operation]):
-  private val known = operations.toSet
+  private val known = HashMap[String, Operation]()
+  operations.foreach(operation => known.put(operation.name, operation): Unit)
 
   private given LabelValue[Operation] = LabelValue.enumerated(operations :+ Operation.Other)(_.name)
 
-  val requests: CounterDef[Long, (operation: Operation, status: StatusClass)] =
-    HttpClientMetrics.requests.labelled[(operation: Operation, status: StatusClass)]
+  val requests: CounterDef[Long, (operation: Operation, status: ClientStatus)] =
+    HttpClientMetrics.requests.labelled[(operation: Operation, status: ClientStatus)]
 
   val duration: HistogramDef[FiniteDuration, (operation: Operation)] = HttpClientMetrics.duration.labelled[(operation: Operation)]
 
@@ -99,7 +123,7 @@ final class HttpClientMetrics private (val operations: List[Operation]):
 
   val definitions: List[MetricDef] = List(requests, duration, inFlight)
 
-  def operation(name: Option[String]): Operation = name.map(Operation(_)).filter(known).getOrElse(Operation.Other)
+  def operation(name: Option[String]): Operation = name.fold(Operation.Other)(known.getOrDefault(_, Operation.Other))
 
   def register[F[*]](using metrics: Metrics[F], F: Effect[F]): F[HttpClientRecorder] =
     F.map(metrics.registerAll((requests, duration, inFlight)))((requests, duration, inFlight) =>
@@ -109,8 +133,9 @@ final class HttpClientMetrics private (val operations: List[Operation]):
 object HttpClientMetrics:
   private given LabelValue[Operation] = LabelValue.bounded(_.name)
 
-  val requests: CounterDef[Long, (operation: Operation, status: StatusClass)] =
-    Counter("http_client_requests", "HTTP requests sent by operation and status class").labelled[(operation: Operation, status: StatusClass)]
+  val requests: CounterDef[Long, (operation: Operation, status: ClientStatus)] =
+    Counter("http_client_requests", "HTTP requests sent by operation and status class, failed when no response came back")
+      .labelled[(operation: Operation, status: ClientStatus)]
 
   val duration: HistogramDef[FiniteDuration, (operation: Operation)] =
     Histogram.seconds("http_client_request_seconds", "Time from sending a request to its response headers", Buckets.Normal).labelled[(operation: Operation)]
@@ -124,17 +149,17 @@ object HttpClientMetrics:
 
 final class HttpClientRecorder private[http] (
     val metrics: HttpClientMetrics,
-    requests: CounterOf.Unsafe[Long, (operation: Operation, status: StatusClass)],
+    requests: CounterOf.Unsafe[Long, (operation: Operation, status: ClientStatus)],
     duration: HistogramOf.Unsafe[FiniteDuration, (operation: Operation)],
     inFlight: GaugeOf.Unsafe[Double, NoLabels],
 ):
   def start(): Long =
-    inFlight.inc(NoLabels)
+    inFlight.inc()
     System.nanoTime()
 
-  def finish(started: Long, operation: Operation, status: StatusClass): Unit =
-    inFlight.dec(NoLabels)
+  def finish(started: Long, operation: Operation, status: ClientStatus): Unit =
+    inFlight.dec()
     requests.inc((operation = operation, status = status))
     duration.observe((operation = operation), FiniteDuration(System.nanoTime() - started, NANOSECONDS))
 
-  def abandon(): Unit = inFlight.dec(NoLabels)
+  def abandon(): Unit = inFlight.dec()

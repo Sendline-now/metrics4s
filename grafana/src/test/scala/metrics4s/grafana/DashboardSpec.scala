@@ -25,6 +25,7 @@ object Definitions:
   val received    = Counter("processor_received", "Received items")
   val processTime = Histogram.seconds("processor_process_seconds", "Processing of one item", Buckets.Normal).labelled[ByOutcome]
   val cacheSize   = Gauge("processor_cache_entries", "Entries in the cache")
+  val usage       = Gauge.ratio("processor_cache_usage_ratio", "Used part of the cache")
   val payload     = Histogram.bytes("processor_payload_bytes", "Size of a payload", Buckets(512, 4096, 65536))
   val build       = Info("processor_build", "The build that runs").labelled[(source: Source)]
   val routed      = Counter("processor_routed", "Routed items").labelled[(sourceQueue: Source, outcome: Outcome)]
@@ -462,6 +463,84 @@ final class DashboardSpec extends AnyWordSpec, Matchers:
           !| `processor_payload_bytes` | histogram, bytes |  | Size of a payload |
           !| `processor_build_info` | info | `source`: `kafka`, `rabbit` | The build that runs |
           !""".stripMargin('!')
+    }
+
+    "replace the table a document keeps between its markers, and leave a document that is up to date as it is" in {
+      val document = s"# Metrics\n\nWritten by hand.\n\n${MetricsDoc.Begin}\nan old table\n${MetricsDoc.End}\n\nMore by hand.\n"
+      val written  = MetricsDoc.embedded(document, List(Definitions.received, Definitions.usage))
+
+      (
+        written,
+        written.flatMap(MetricsDoc.embedded(_, List(Definitions.received, Definitions.usage))),
+        MetricsDoc.embedded("<!-- table -->\n<!-- /table -->", List(Definitions.cacheSize), "<!-- table -->", "<!-- /table -->"),
+      ) shouldBe (
+        Right(
+          s"""# Metrics
+             !
+             !Written by hand.
+             !
+             !${MetricsDoc.Begin}
+             !
+             !| Metric | Type | Labels | What |
+             !|---|---|---|---|
+             !| `processor_received_total` | counter |  | Received items |
+             !| `processor_cache_usage_ratio` | gauge, ratio |  | Used part of the cache |
+             !
+             !${MetricsDoc.End}
+             !
+             !More by hand.
+             !""".stripMargin('!')
+        ),
+        written,
+        Right(
+          "<!-- table -->\n\n| Metric | Type | Labels | What |\n|---|---|---|---|\n| `processor_cache_entries` | gauge |  | Entries in the cache |\n\n<!-- /table -->"
+        ),
+      )
+    }
+
+    "write the table with the line endings the document has, so a Windows checkout compares equal to itself" in {
+      val document = s"# Metrics\r\n\r\n${MetricsDoc.Begin}\r\n${MetricsDoc.End}\r\n"
+      val written  = MetricsDoc.embedded(document, List(Definitions.received))
+
+      (
+        written,
+        written.flatMap(MetricsDoc.embedded(_, List(Definitions.received))),
+      ) shouldBe (
+        Right(
+          s"# Metrics\r\n\r\n${MetricsDoc.Begin}\r\n\r\n| Metric | Type | Labels | What |\r\n|---|---|---|---|\r\n" +
+            s"| `processor_received_total` | counter |  | Received items |\r\n\r\n${MetricsDoc.End}\r\n"
+        ),
+        written,
+      )
+    }
+
+    "refuse a document without its markers, or with the closing one first" in {
+      val refused = Left(GrafanaError.MissingMarkers(MetricsDoc.Begin, MetricsDoc.End))
+
+      (
+        MetricsDoc.embedded("# Metrics", List(Definitions.received)),
+        MetricsDoc.embedded(s"${MetricsDoc.End} ${MetricsDoc.Begin}", List(Definitions.received)),
+        refused.left.map(_.toThrowable.getMessage),
+      ) shouldBe (
+        refused,
+        refused,
+        Left("the document has no <!-- metrics4s:table --> ... <!-- /metrics4s:table --> block for the table, in that order"),
+      )
+    }
+  }
+
+  "a ratio gauge" should {
+    "be drawn as a share of one" in {
+      (Panel.gauge(Definitions.usage).unit, Stat.gauge(Definitions.usage).unit) shouldBe ("percentunit", "percentunit")
+    }
+  }
+
+  "an error of a dashboard" should {
+    "be raised as an exception that keeps it, when a build wants to stop on it" in {
+      val error =
+        Dashboard("api", "Line / api", "line", ServiceFilter.regex("api"))(Row("Empty")(Panel.custom("Nothing", "short", "No queries")())).render.left.map(_.toThrowable)
+
+      error.left.map(thrown => (thrown.error, thrown.getMessage)) shouldBe Left((GrafanaError.EmptyPanel("Nothing"), "Nothing: a panel needs at least one query"))
     }
   }
 

@@ -7,7 +7,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import metrics4s.MetricDef
 import metrics4s.it.docs.quickstart.ProcessorMetrics as Definitions
-import metrics4s.grafana.{Dashboard, Panel, Row, ServiceFilter, Stat, Stats}
+import metrics4s.grafana.{Dashboard, MetricsDoc, Panel, Row, ServiceFilter, Stat, Stats}
 
 object ProcessorMetrics:
   val definitions: List[MetricDef] = List(Definitions.processed, Definitions.processTime, Definitions.cacheSize)
@@ -25,5 +25,11 @@ abstract class DashboardFileSpec extends AnyWordSpec, Matchers:
 
     "read only series the service's definitions serve" in {
       ProcessorMetrics.dashboard.missingSeries(ProcessorMetrics.definitions) shouldBe Set.empty
+    }
+
+    "have every metric in the table of the README beside it" in {
+      val readme = Files.readString(Paths.get("metrics/README.md"))
+
+      MetricsDoc.embedded(readme, ProcessorMetrics.definitions) shouldBe Right(readme)
     }
   }

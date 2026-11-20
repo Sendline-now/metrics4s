@@ -68,10 +68,10 @@ Runs on JDK 17 or newer. `metrics4s-rapid` needs 21 and `metrics4s-kyo` needs 25
 
 ```scala
 libraryDependencies ++= Seq(
-  "now.sendline" %% "metrics4s-cats"       % "0.2.0", // core + cats-effect, with its runtime metrics
-  "now.sendline" %% "metrics4s-prometheus" % "0.2.0", // the backend, the exporter and JVM metrics
-  "now.sendline" %% "metrics4s-grafana"    % "0.2.0", // dashboards and README tables from the definitions
-  "now.sendline" %% "metrics4s-testkit"    % "0.2.0" % Test,
+  "now.sendline" %% "metrics4s-cats"       % "1.0.0", // core + cats-effect, with its runtime metrics
+  "now.sendline" %% "metrics4s-prometheus" % "1.0.0", // the backend, the exporter and JVM metrics
+  "now.sendline" %% "metrics4s-grafana"    % "1.0.0", // dashboards and README tables from the definitions
+  "now.sendline" %% "metrics4s-testkit"    % "1.0.0" % Test,
 )
 ```
 
@@ -141,8 +141,8 @@ Three things the compiler cannot check:
   a test run starts the app twice, the second copy finds its names taken and fails to register. Create a
   `PrometheusRegistry()` and hand the same one to the exporter.
 - **Serve the metrics on a port of their own.** `PrometheusExporter.allocated(9464, registry)` listens apart from the
-  API, so `/metrics` never goes out through the public ingress. A port that is taken fails with an `ExporterException`
-  that names it.
+  API, so `/metrics` never goes out through the public ingress, and `allocated("10.0.0.5", 9464, registry)` listens on
+  one interface only. A port that is taken fails with an `ExporterException` that names it.
 - **Label only from closed sets:** an enum, a list known at startup (`LabelValue.enumerated`), or
   `LabelValue.bounded` for a value the deployment fixes, such as the build's version in an `Info`. A user id, a path
   or an error message adds a series for every value it ever takes.
@@ -155,8 +155,8 @@ A definition is a value with no effect and no registry. It is checked when it is
 | --- | --- | --- | --- |
 | `Counter` | not end with `_total`, `_seconds`, `_bytes` | `Long` | `<name>_total` |
 | `Counter.seconds`, `Counter.bytes` | end with the unit | `FiniteDuration`, `Long` | `<name>_total` |
-| `Gauge` | not end with `_seconds`, `_bytes` | `Double` | `<name>` |
-| `Gauge.seconds`, `Gauge.bytes` | end with the unit | `FiniteDuration`, `Long` | `<name>` |
+| `Gauge` | not end with `_seconds`, `_bytes`, `_ratio` | `Double` | `<name>` |
+| `Gauge.seconds`, `Gauge.bytes`, `Gauge.ratio` | end with the unit | `FiniteDuration`, `Long`, `Double` | `<name>` |
 | `Histogram.seconds`, `Histogram.bytes` | end with the unit | `FiniteDuration`, `Long` | `_bucket`, `_sum`, `_count` |
 | `Histogram.sizes` | not end with `_seconds`, `_bytes` | `Long` | `_bucket`, `_sum`, `_count` |
 | `Info` | not end with `_seconds`, `_bytes` | its labels | `<name>_info`, always `1` |
@@ -168,9 +168,15 @@ adds (`_bucket`, `_count`, `_sum`, `_created`, `_info`, `_total`) can be written
 Invalid metric name "processor_items_total": it must not end with _total: every counter is exposed with _total added
 ```
 
-**Buckets** are checked the same way (`Buckets(0.1, 0.5, 1)`: positive, strictly increasing). Computed ones go through
-`Buckets.from(seq): Either[MetricError, Buckets]`. `Buckets.Fast`, `Buckets.Normal` and `Buckets.Sizes` are the sets the
-services already use. Every histogram is registered `classicOnly`.
+**Buckets** are checked the same way (`Buckets(0.1, 0.5, 1)`: positive, strictly increasing).
+`Buckets.linear(0.1, 0.1, 10)` is ten bounds a tenth apart and `Buckets.exponential(0.001, 2, 12)` twelve that double,
+both from literals and without the noise of floating-point sums. Computed ones go through `Buckets.from(seq)`,
+`Buckets.linearFrom` and `Buckets.exponentialFrom`, each an `Either[MetricError, Buckets]`. `Buckets.Fast`,
+`Buckets.Normal` and `Buckets.Sizes` are the sets the services already use. Every histogram is registered
+`classicOnly`.
+
+A **ratio** is a gauge between 0 and 1 named `_ratio`: `Gauge.ratio("cache_usage_ratio", "Used part of the cache")`. A
+dashboard draws it as a percentage.
 
 ### Labels
 
@@ -190,23 +196,39 @@ val skipped  = Counter("processor_skipped", "Skipped items by reason").labelled[
   `NotFound` becomes `not_found`. An enum that carries its own string says so instead:
   `given LabelValue[Level] = LabelValue.enumerated(Level.values)(_.value)`.
 * **`derives Labels`** works for case classes, and named tuples need nothing at all. Label names are the field names
-  in snake case.
+  in snake case, checked where the labels are derived: a field named `le`, `quantile` or `__anything`, or two fields
+  that come to the same name, do not compile.
 * **A single label** needs its name: `given Labels[Outcome] = Labels.single("outcome")`. A label name is never guessed
   from a type name.
 * **A value bounded by its type but not enumerable**, such as a provider configured at startup, is
   `LabelValue.bounded(render)`. Its series appear as they are used.
 * **There is no `LabelValue[String]`.** An id, a path or an error message would be a new series forever.
 
-When every label is enumerated, registration creates every combination at zero. A product larger than
-`MetricsConfig.preCreateLimit` (512 by default) fails registration with `MetricError.DomainTooLarge`, unless the
-definition says `.withoutPreCreation`. Registration also refuses reserved label names (`le`, `quantile`, `__*`), a
-label declared twice and two values that render the same.
+When every label is enumerated, registration creates every combination at zero. `MetricsConfig.preCreateLimit` is
+how many series one metric may create this way, 10 000 by default. A counter or a gauge spends one series on a
+combination; a histogram spends its buckets, `+Inf`, `_sum` and `_count`, 15 with `Buckets.Normal`. A metric over the
+limit fails registration with `MetricError.DomainTooLarge`, which shows the sum:
+
+```
+http_server_request_seconds: 700 route x 15 series each = 10500 series, more than the 10000 a metric creates up front
+```
+
+A definition chooses otherwise with `.withPreCreation`:
+
+| `PreCreation` | Within the limit | Over the limit |
+| --- | --- | --- |
+| `Always`, the default | created at zero | registration fails |
+| `WithinLimit` | created at zero | created on first use |
+| `Never`, also `.withoutPreCreation` | created on first use | created on first use |
+
+Registration also refuses two label values that render the same, and the label names a hand-built `Labels` got past
+the compiler.
 
 ## Recording
 
-`Metrics[F].register(definition)` gives an instrument, and `registerAll` gives a tuple of them. If one registration in
-the tuple fails, the ones already done are unregistered. Failures are a `MetricException` carrying a `MetricError`,
-raised in `F`.
+`Metrics[F].register(definition)` gives an instrument, and `registerAll` gives a tuple of them, which compiles only
+for a tuple of definitions. If one registration in the tuple fails, the ones already done are unregistered. Failures
+are a `MetricException` carrying a `MetricError`, raised in `F`.
 
 ```scala
 counter.inc(Outcome.Ok)                    // F[Unit]
@@ -214,6 +236,8 @@ counter.add(Outcome.Skipped, 5)
 total.inc()                                // a metric without labels
 gauge.set(Outcome.Ok, 42)
 inFlight.inc(Outcome.Ok); inFlight.dec(Outcome.Ok)
+inFlight.track(Outcome.Ok)(fa)             // one more while fa runs, one less once it ends, fails or is cancelled
+lastRun.timed(fa)                          // a gauge of seconds keeps how long the last run took
 gauge.replace(Map(Outcome.Ok -> 3))        // the rest goes to 0, or is removed when the label is bounded
 histogram.observe(Outcome.Ok, 250.millis)
 histogram.timed(Outcome.Ok)(fa)            // a success and a failure are recorded, a cancellation is not
@@ -311,17 +335,18 @@ The runtime metrics export the families commons exports, with the same names, ty
 ## The Prometheus backend
 
 ```scala
-given Metrics[IO] = PrometheusMetrics[IO](registry)              // or PrometheusMetrics[IO](registry, MetricsConfig.default.withPreCreateLimit(1024))
+given Metrics[IO] = PrometheusMetrics[IO](registry)              // or PrometheusMetrics[IO](registry, MetricsConfig.default.withPreCreateLimit(50000))
 PrometheusMetrics.jvm[IO](registry)                              // the client's own JVM metrics: jvm_memory_used_bytes, process_cpu_seconds_total, ...
 PrometheusExporter.allocated[IO](9090, registry).toResource      // HTTPServer; port 0 picks a free one, exporter.port says which
+PrometheusExporter.allocated[IO]("127.0.0.1", 9464, registry).toResource // only on the interface it is given
 PrometheusScrape.text(registry)                                  // the exposition, for a /metrics route of your own
 ```
 
 The registry is passed, never assumed. `PrometheusRegistry.defaultRegistry` is the one other Java libraries register
 on, so services often want it. When they do, they write it out.
 
-When the exporter cannot listen on its port, `allocated` fails with an `ExporterException`: its message and its `port`
-name the port, and the bind failure is its cause.
+When the exporter cannot listen, `allocated` fails with an `ExporterException`: its message, its `port` and its
+`host` name where, and the bind failure is its cause.
 
 ## Testing
 
@@ -339,8 +364,8 @@ yield
   testkit.value(ProcessorMetrics.processed, Outcome.Error) shouldBe Some(0.0)
 ```
 
-* `value`, `histogram(...)` (`count`, `sum`, cumulative `buckets`) and `labelValues` take the definition, so a test
-  cannot misspell a series.
+* `value`, `histogram(...)` (`count`, `sum`, cumulative `buckets`), `info` (the labels an info metric says now) and
+  `labelValues` take the definition, so a test cannot misspell a series.
 * `series` is the exposition as a map, keyed `name{a="x",b="y"}` the way the dashboards read it.
 * `missingSeries(dashboard)` lists every series a dashboard queries that the registry does not export.
 
@@ -394,15 +419,22 @@ dashboard.writeTo(Paths.get("metrics"))
 * Keep the rendered JSON in the repository and compare it in a test, so a metric changed without its dashboard fails
   the build.
 * `MetricsDoc.markdown(definitions*)` writes the `Metric | Type | Labels | What` table for `metrics/README.md`, with the
-  label values listed.
+  label values listed. `MetricsDoc.embedded(document, definitions)` puts it into a document between
+  `<!-- metrics4s:table -->` and `<!-- /metrics4s:table -->`, or markers of your own, and leaves the prose around it
+  alone. A document that is up to date comes back unchanged, which is the whole test for it.
+* A `GrafanaError` has a `message` and, for a build that should stop on it, `toThrowable`.
 
-The integration tests import a generated dashboard into Grafana 12. Every query of every panel then has to return
-data through Grafana's Prometheus datasource, scraped by Prometheus 3.5 from a running service.
+The integration tests import a generated dashboard into Grafana 13. Every query of every panel then has to return
+data through Grafana's Prometheus datasource, scraped by Prometheus 3.16 from a running service.
 
 ## Integrations
 
 All four share the HTTP definitions in `metrics4s-http`, so one dashboard row fits whichever is used. Routes are
-templates from a closed set, and status is a class (`2xx`, `4xx`, `failed`).
+templates from a closed set, and status is a class. A server always answers, so its `StatusClass` is `1xx` to `5xx`,
+an exception being `5xx`. A client can be left without an answer, so its `ClientStatus` has `failed` as well.
+
+A request that is cancelled before it is answered (a caller that hangs up, a call that times out) is counted
+nowhere and leaves nothing in flight.
 
 ```scala
 // http4s: the route templates and a classifier into them; anything else is "unmatched"
@@ -412,7 +444,7 @@ val client     = Http4sClientMetrics[IO](httpClient, List("get-event"))(operatio
 // tapir: the templates come from the endpoints
 TapirMetrics[IO](endpoints).map(metrics => Http4sServerOptions.customiseInterceptors[IO].metricsInterceptor(metrics.interceptor))
 
-// sttp client 4
+// sttp client 4: a backend of any kind comes back as the same kind
 SttpMetrics.register[IO](List("get-user")).map(recorder => SttpMetrics.wrap(backend, recorder)(operationOf))
 
 // MongoDB driver, and mongo4s through MongoClientResource.fromSettings
@@ -427,7 +459,7 @@ dashboard needs the label names, not the values, so it draws from them without t
 Stats(
   Stat.rate(HttpServerMetrics.requests),
   Stat.quantile(HttpServerMetrics.duration, 0.95),
-  Stat.share(HttpServerMetrics.requests)(_.status.in(StatusClass.ServerError, StatusClass.Failed)),
+  Stat.share(HttpServerMetrics.requests)(_.status === StatusClass.ServerError),
 )
 
 dashboard.missingSeries(List(ProcessorMetrics.processed, ProcessorMetrics.processTime) ++ HttpServerMetrics.definitions)
@@ -450,15 +482,17 @@ dashboard.missingSeries(List(ProcessorMetrics.processed, ProcessorMetrics.proces
 | `metrics4s-grafana` | core | Dashboards and README tables |
 | `metrics4s-http` | core | The HTTP definitions the HTTP integrations share |
 | `metrics4s-http4s` | http, cats, http4s 0.23 | Server and client middleware |
-| `metrics4s-tapir` | http, tapir-server | A metric for `MetricsRequestInterceptor` |
-| `metrics4s-sttp` | http, sttp client 4 | A listener backend |
+| `metrics4s-tapir` | http, tapir-server | A `MetricsRequestInterceptor` |
+| `metrics4s-sttp` | http, sttp client 4 | A listener backend, for every kind of backend |
 | `metrics4s-mongo` | core, mongodb-driver-core | Command and connection-pool listeners |
 
 ## Known gaps
 
 - `process_resident_memory_bytes` is read from `/proc`, so it exists only on Linux. On macOS that JVM panel is empty.
-- MongoDB command series are not created up front: commands times collections times buckets would be thousands of
-  zeros. Their panels fill as the commands run.
+- MongoDB command times are not created up front: commands times collections times buckets would be thousands of
+  zeros, so those panels fill as the commands run. The failure counters are, at zero, while they fit the limit.
+- The dashboards filter by the `namespace`, `service` and `pod` labels of a Kubernetes scrape. A Prometheus that
+  labels its targets otherwise has to add the three when it relabels.
 - rapid cancels by interrupting a thread. A fiber cancelled while parked on a callback runs none of its finalizers.
 - Kyo does not wait for a cancelled fiber's finalizers, so they may finish after the cancellation returns.
 - ZIO fiber metrics count only the fibers started after the metrics are registered.

@@ -30,7 +30,7 @@ abstract class Integrations(httpClient: Client[IO], endpoints: List[AnyEndpoint]
   // tapir: the templates come from the endpoints
   TapirMetrics[IO](endpoints).map(metrics => Http4sServerOptions.customiseInterceptors[IO].metricsInterceptor(metrics.interceptor))
 
-  // sttp client 4
+  // sttp client 4: a backend of any kind comes back as the same kind
   SttpMetrics.register[IO](List("get-user")).map(recorder => SttpMetrics.wrap(backend, recorder)(operationOf))
 
   // MongoDB driver, and mongo4s through MongoClientResource.fromSettings

@@ -76,6 +76,10 @@ Every configured tenant is pre-created at zero, so the dashboard shows the ones 
 value outside the list fails, which is why a request's tenant goes through `tenantOf`: an id nobody configured is
 counted as `other` and never becomes a series of its own.
 
+A list that the configuration can grow past `MetricsConfig.preCreateLimit` would stop the service at start with
+`DomainTooLarge`. Where that would be worse than a panel that fills in late, the definition says
+`.withPreCreation(PreCreation.WithinLimit)`: its series are created at zero while they fit and on first use after.
+
 ## Errors as a label
 
 An error message, or an exception's class name, is a new series for every new message. A closed set of results is what
@@ -105,8 +109,9 @@ successes, each under its result. The error itself is re-raised unchanged.
 
 ## A dashboard kept in the repository
 
-A generated dashboard committed next to the code is reviewed like code. Two tests keep it honest: the file is what the
-definitions render, and the dashboard reads nothing the definitions do not serve:
+A generated dashboard committed next to the code is reviewed like code. Three tests keep it honest: the file is what
+the definitions render, the dashboard reads nothing the definitions do not serve, and the README beside it lists every
+metric:
 
 ```scala
 "the dashboard" should {
@@ -117,6 +122,12 @@ definitions render, and the dashboard reads nothing the definitions do not serve
   "read only series the service's definitions serve" in {
     ProcessorMetrics.dashboard.missingSeries(ProcessorMetrics.definitions) shouldBe Set.empty
   }
+
+  "have every metric in the table of the README beside it" in {
+    val readme = Files.readString(Paths.get("metrics/README.md"))
+
+    MetricsDoc.embedded(readme, ProcessorMetrics.definitions) shouldBe Right(readme)
+  }
 }
 ```
 
@@ -124,6 +135,10 @@ When the first test fails on purpose, `ProcessorMetrics.dashboard.writeTo(Paths.
 and the diff shows what changed on the dashboard. `MetricsTestkit().missingSeries(dashboard)` runs the same check
 against a registry, which covers the shared rows as well: register the service's metrics, the runtime metrics and
 `PrometheusMetrics.jvm` on the testkit's registry first.
+
+The README keeps its table between `<!-- metrics4s:table -->` and `<!-- /metrics4s:table -->`, and everything
+outside the two is written by hand and left alone. When the third test fails, write what `MetricsDoc.embedded` gives
+back to the file.
 
 ## Stats that show when something is wrong
 
@@ -133,7 +148,7 @@ A stat with thresholds turns orange or red by itself, and a filter narrows it to
 Stats(
   Stat.podsUp,
   Stat
-    .share(HttpServerMetrics.requests)(_.status.in(StatusClass.ServerError, StatusClass.Failed))
+    .share(HttpServerMetrics.requests)(_.status === StatusClass.ServerError)
     .titled("Server errors")
     .withThresholds(Color.Green, 0.01 -> Color.Orange, 0.05 -> Color.Red),
   Stat

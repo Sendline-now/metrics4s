@@ -40,10 +40,10 @@ jobs:
             ${{ runner.os }}-sbt-
 
       - name: Check formatting
-        run: sbt "scalafmtCheckAll; scalafmtSbtCheck; it/scalafmtCheck; it/Test/scalafmtCheck"
+        run: sbt "scalafmtCheckAll; scalafmtSbtCheck; it/scalafmtCheck; it/Test/scalafmtCheck; benchmarks/scalafmtCheck"
 
       - name: Compile
-        run: sbt Test/compile
+        run: sbt "Test/compile; benchmarks/compile"
 
       - name: Test
         run: sbt "testOnly *"

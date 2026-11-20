@@ -87,6 +87,9 @@ final class FakeBackend extends MetricsBackend:
         values.remove((definition.name.value, labelValues.toList)): Unit
         observations.remove((definition.name.value, labelValues.toList)): Unit
 
+      def labelValues: Iterable[IArray[String]] =
+        (values.keys ++ observations.keys).collect { case (metric, labels) if metric == definition.name.value => IArray.from(labels) }.toList
+
       def unregister(): Unit =
         registered.remove(definition.name.value): Unit
         values.filterInPlace((key, _) => key._1 != definition.name.value): Unit

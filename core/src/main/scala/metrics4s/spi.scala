@@ -13,6 +13,7 @@ trait Registration:
 trait Series[C] extends Registration:
   def cell(labelValues: IArray[String]): C
   def remove(labelValues: IArray[String]): Unit
+  def labelValues: Iterable[IArray[String]]
 
 trait CounterCell:
   def add(amount: Double): Unit

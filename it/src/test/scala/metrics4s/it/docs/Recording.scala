@@ -17,6 +17,7 @@ final class Recording(
     gauge: GaugeOf[IO, Double, Outcome],
     inFlight: GaugeOf[IO, Double, Outcome],
     histogram: HistogramOf[IO, FiniteDuration, Outcome],
+    lastRun: GaugeOf[IO, FiniteDuration, NoLabels],
 ):
   def record(fa: IO[String]): IO[Unit] =
     counter.inc(Outcome.Ok)         // F[Unit]
@@ -24,6 +25,8 @@ final class Recording(
     total.inc()                     // a metric without labels
     gauge.set(Outcome.Ok, 42)
     inFlight.inc(Outcome.Ok); inFlight.dec(Outcome.Ok)
+    inFlight.track(Outcome.Ok)(fa)  // one more while fa runs, one less once it ends, fails or is cancelled
+    lastRun.timed(fa)               // a gauge of seconds keeps how long the last run took
     gauge.replace(Map(Outcome.Ok -> 3)) // the rest goes to 0, or is removed when the label is bounded
     histogram.observe(Outcome.Ok, 250.millis)
     histogram.timed(Outcome.Ok)(fa) // a success and a failure are recorded, a cancellation is not
@@ -66,7 +69,7 @@ enum Stage derives LabelValue:
   case Dev, Prod
 
 object BuildInfo:
-  val version = "0.2.0"
+  val version = "1.0.0"
 
 object Builds:
   def publish(using Metrics[IO]): IO[Unit] =

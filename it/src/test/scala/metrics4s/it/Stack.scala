@@ -15,7 +15,7 @@ import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.images.builder.Transferable
 import org.testcontainers.utility.DockerImageName
 
-final class PrometheusContainer(network: Network, target: Int) extends GenericContainer[PrometheusContainer](DockerImageName.parse("prom/prometheus:v3.5.0")):
+final class PrometheusContainer(network: Network, target: Int) extends GenericContainer[PrometheusContainer](DockerImageName.parse("prom/prometheus:v3.16.0")):
   withNetwork(network)
   withNetworkAliases("prometheus")
   withExposedPorts(9090)
@@ -39,7 +39,7 @@ object PrometheusContainer:
        |          pod: processor-0
        |""".stripMargin
 
-final class GrafanaContainer(network: Network) extends GenericContainer[GrafanaContainer](DockerImageName.parse("grafana/grafana:12.0.0")):
+final class GrafanaContainer(network: Network) extends GenericContainer[GrafanaContainer](DockerImageName.parse("grafana/grafana:13.3.1")):
   withNetwork(network)
   withExposedPorts(3000)
   withEnv("GF_SECURITY_ADMIN_PASSWORD", "metrics4s")

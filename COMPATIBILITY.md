@@ -4,10 +4,12 @@
 
 ## What the artifacts promise
 
-* **Before `1.0.0`, a minor release may break the API.** Every break is listed in [CHANGELOG.md](CHANGELOG.md) with
-  what to change. `versionScheme := "semver-spec"` says so to sbt and to Scala Steward.
-* **From `1.0.0` on, MiMa checks** binary compatibility against the previous release on every build. Every deliberate
-  break inside a major version is then an exclusion in `build.sbt` and an entry here, so nothing is waived silently.
+* **`1.0.0` is the first stable release.** A minor or a patch release after it does not break the API.
+  `versionScheme := "semver-spec"` says so to sbt and to Scala Steward. `0.1.0` and `0.2.0` made no such promise, and
+  `1.0.0` breaks both; what to change is [below](#coming-from-020).
+* **MiMa checks** binary compatibility against the previous release on every build, starting with the release after
+  `1.0.0`, which has nothing stable before it to be checked against. Every deliberate break inside a major version is
+  then an exclusion in `build.sbt` and an entry here, so nothing is waived silently.
 * New members of `Effect`, `Dispatch` and the backend SPI carry default implementations wherever one exists, so an
   instance of your own keeps compiling across minor releases.
 * Configuration types (`MetricsConfig`) are builders with a private constructor, not case classes, so adding an option
@@ -17,20 +19,47 @@
 
 | | Version |
 | --- | --- |
-| Scala | `3.9.0` (built on the LTS); the `it` module compiles on `3.10.0` against it |
+| Scala | `3.9.0` (built on the LTS); the `it` module compiles on `3.10.1` against it |
 | JDK, to run | 17 or newer: every module is compiled to Java 17 class files. `metrics4s-rapid` needs 21, because rapid runs on virtual threads, and `metrics4s-kyo` needs 25, because Kyo ships Java 25 class files |
 | JDK, to build | 25 or newer, checked when the build loads |
 | Prometheus Java client | `1.10.0` |
 | cats-effect | `3.7.1` |
 | ZIO | `2.1.27` |
 | Kyo | `1.0.0-RC7` |
-| rapid | `2.9.9` |
-| http4s | `0.23.38` |
+| rapid | `2.9.10` |
+| http4s | `0.23.39` |
 | tapir | `1.14.1` |
-| sttp client | `4.1.1` |
-| MongoDB driver | `5.14.0`, and `mongo4s` `5.1.1` in the integration tests. Drivers `5.6.0` to `5.13.0` carry [JAVA-6313](https://jira.mongodb.org/browse/JAVA-6313) |
-| Prometheus server | `v3.5.0` in the integration tests |
-| Grafana | `12.0.0` in the integration tests; the dashboards use schema version 39 |
+| sttp client | `4.1.3` |
+| MongoDB driver | `5.15.0`, with `mongo4s` `6.0.0` against MongoDB `9.0` in the integration tests. Drivers `5.6.0` to `5.13.0` carry [JAVA-6313](https://jira.mongodb.org/browse/JAVA-6313) |
+| Prometheus server | `v3.16.0` in the integration tests |
+| Grafana | `13.3.1` in the integration tests; the dashboards use schema version 39 |
+
+## Coming from 0.2.0
+
+The series a service exports keep their names, types and labels, with two exceptions: a server no longer exports
+`http_server_requests_total{status="failed"}`, which was always zero, and `mongo_command_failures_total` is there from
+the first scrape. Code changes:
+
+| 0.2.0 | 1.0.0 |
+| --- | --- |
+| `MetricsConfig.default.withPreCreateLimit(2048)`, raised so that the HTTP metrics would register | Nothing: the default is 10 000 series. A limit that is still set now counts series, so a histogram's is its combinations times its buckets plus three |
+| `case MetricError.DomainTooLarge(metric, series, limit)` | `case MetricError.DomainTooLarge(metric, domains, seriesEach, series, limit)` |
+| `definition.preCreated` | `definition.preCreation`, a `PreCreation` |
+| A label field named `le` or `quantile`, refused when the metric registered | Does not compile; rename the field |
+| `Gauge("cache_usage_ratio", ...)` | `Gauge.ratio("cache_usage_ratio", ...)` |
+| `StatusClass.Failed` on a server metric, `status=~"5xx\|failed"` in its queries | `StatusClass.ServerError`, `status="5xx"` |
+| `StatusClass` on a client metric | `ClientStatus`, with the same cases and `Failed` |
+| `HttpClientRecorder.finish(started, operation, StatusClass.of(code))` | `finish(started, operation, ClientStatus.of(code))` |
+| `MetricsRequestInterceptor(List(metrics.metric), ignored)` | `metrics.interceptor` |
+| `new ExporterException(port, cause)`, `case e: ExporterException => e.port` | `ExporterException(host, port, cause)`; `e.port` as before, `e.host` beside it |
+| `dashboard.render.fold(error => throw IllegalStateException(error.message), identity)` | `dashboard.render.fold(error => throw error.toThrowable, identity)` |
+| The README table cut into the file by hand between two markers | `MetricsDoc.embedded(readme, definitions, begin, end)` |
+| `monotonic` before and after, then `gauge.set(ended - started)` | `gauge.timed(fa)` |
+| `inFlight.inc() *> fa.guarantee(inFlight.dec())` | `inFlight.track(fa)` |
+| `testkit.series.keys.filter(_.startsWith("build_info{"))` | `testkit.info(build)` |
+| A `MetricsBackend` of your own | Its `Series` implement `labelValues`, the label values of the series the metric has now |
+
+A dashboard kept in the repository and compared in a test changes with these: regenerate it.
 
 ## Coming from commons
 

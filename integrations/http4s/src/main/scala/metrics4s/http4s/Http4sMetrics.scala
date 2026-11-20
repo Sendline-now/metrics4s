@@ -20,9 +20,8 @@ object Http4sServerMetrics:
     routes =>
       Kleisli { request =>
         OptionT {
-          F.delay(recorder.start()).flatMap { started =>
+          F.delay((recorder.metrics.route(classify(request)), recorder.start())).flatMap { (route, started) =>
             F.onCancel(F.attempt(routes(request).value), F.delay(recorder.abandon())).flatMap { result =>
-              val route  = recorder.metrics.route(classify(request))
               val status = result.fold(_ => StatusClass.ServerError, _.fold(StatusClass.ClientError)(response => StatusClass.of(response.status.code)))
               F.delay(recorder.finish(started, route, status)) >> F.fromEither(result)
             }
@@ -36,9 +35,7 @@ object Http4sClientMetrics:
 
   def wrap[F[*]](client: Client[F], recorder: HttpClientRecorder)(classify: Request[F] => Option[String])(using F: Async[F]): Client[F] =
     Client[F] { request =>
-      val operation = recorder.metrics.operation(classify(request))
-
-      Resource.eval(F.delay(recorder.start())).flatMap { started =>
+      Resource.eval(F.delay((recorder.metrics.operation(classify(request)), recorder.start()))).flatMap { (operation, started) =>
         client
           .run(request)
           .attempt
@@ -48,5 +45,5 @@ object Http4sClientMetrics:
       }
     }
 
-  private def statusOf[F[*]](result: Either[Throwable, Response[F]]): StatusClass =
-    result.fold(_ => StatusClass.Failed, response => StatusClass.of(response.status.code))
+  private def statusOf[F[*]](result: Either[Throwable, Response[F]]): ClientStatus =
+    result.fold(_ => ClientStatus.Failed, response => ClientStatus.of(response.status.code))

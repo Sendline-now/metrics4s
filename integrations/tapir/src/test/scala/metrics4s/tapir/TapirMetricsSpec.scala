@@ -6,7 +6,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
 import fs2.Stream
-import cats.effect.IO
+import cats.effect.{Deferred, IO}
 import cats.effect.testing.scalatest.AsyncIOSpec
 import org.http4s.{Method, Request, Status, Uri}
 import sttp.model.StatusCode
@@ -92,5 +92,42 @@ final class TapirMetricsSpec extends AsyncWordSpec, AsyncIOSpec, Matchers:
         testkit.histogram(defs.duration, (route = Route("GET /stream"))).map(_.count),
         testkit.value(defs.inFlight),
       ) shouldBe (Status.Ok, true, Some(1.0), Some(0.0), Some(1L), Some(0.0))
+    }
+
+    "leave nothing in flight and count nothing when a request is canceled before it is answered, as a client that hangs up cancels it" in {
+      val testkit       = MetricsTestkit()
+      given Metrics[IO] = testkit.metrics[IO]
+      val slow          = endpoint.get.in("slow").out(stringBody)
+      val defs          = HttpServerMetrics(List(TapirMetrics.template(slow)))
+
+      for
+        entered <- Deferred[IO, Unit]
+        metrics <- TapirMetrics[IO](List(slow))
+        options  = Http4sServerOptions.customiseInterceptors[IO].metricsInterceptor(metrics.interceptor).options
+        app      = Http4sServerInterpreter[IO](options).toRoutes(slow.serverLogicSuccess[IO](_ => entered.complete(()) *> IO.never[String])).orNotFound
+        request <- app.run(Request[IO](Method.GET, Uri.unsafeFromString("/slow"))).start
+        _       <- entered.get
+        during   = testkit.value(defs.inFlight)
+        _       <- request.cancel
+      yield (during, testkit.value(defs.inFlight), testkit.histogram(defs.duration, (route = Route("GET /slow"))).map(_.count)) shouldBe (Some(1.0), Some(0.0), Some(0L))
+    }
+
+    "count a request whose input does not decode as the endpoint it reached, answered 400" in {
+      val testkit       = MetricsTestkit()
+      given Metrics[IO] = testkit.metrics[IO]
+      val paged         = endpoint.get.in("pages").in(query[Int]("page")).out(stringBody)
+      val defs          = HttpServerMetrics(List(TapirMetrics.template(paged)))
+
+      for
+        metrics <- TapirMetrics[IO](List(paged))
+        options  = Http4sServerOptions.customiseInterceptors[IO].metricsInterceptor(metrics.interceptor).options
+        app      = Http4sServerInterpreter[IO](options).toRoutes(paged.serverLogicSuccess[IO](page => IO.pure(s"page $page"))).orNotFound
+        status  <- app.run(Request[IO](Method.GET, Uri.unsafeFromString("/pages?page=first"))).map(_.status)
+      yield (
+        status,
+        testkit.value(defs.requests, (route = Route("GET /pages"), status = StatusClass.ClientError)),
+        testkit.value(defs.requests, (route = Route.Unmatched, status = StatusClass.ClientError)),
+        testkit.value(defs.inFlight),
+      ) shouldBe (Status.BadRequest, Some(1.0), Some(0.0), Some(0.0))
     }
   }
