@@ -33,7 +33,7 @@ lazy val commonSettings = Seq(
   organizationHomepage   := Some(uri("https://oss.sendline.now/")),
   homepage               := Some(uri("https://oss.sendline.now/metrics4s/")),
   description            := "Typed, effect-agnostic metrics for Scala 3 on the Prometheus Java client",
-  version                := "0.2.0",
+  version                := "1.0.0",
   versionScheme          := Some("semver-spec"),
   scalaVersion           := Versions.scala3,
   parallelExecution      := true,
@@ -225,7 +225,7 @@ lazy val benchmarks = project
   .settings(
     name := "metrics4s-benchmarks"
   )
-  .dependsOn(prometheus)
+  .dependsOn(prometheus, http)
 
 lazy val it = project
   .in(file("it"))

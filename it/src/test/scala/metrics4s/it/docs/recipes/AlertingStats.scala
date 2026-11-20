@@ -8,7 +8,7 @@ object AlertingStats:
     Stats(
       Stat.podsUp,
       Stat
-        .share(HttpServerMetrics.requests)(_.status.in(StatusClass.ServerError, StatusClass.Failed))
+        .share(HttpServerMetrics.requests)(_.status === StatusClass.ServerError)
         .titled("Server errors")
         .withThresholds(Color.Green, 0.01 -> Color.Orange, 0.05 -> Color.Red),
       Stat

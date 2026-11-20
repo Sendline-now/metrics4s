@@ -95,6 +95,21 @@ final class PrometheusBackendSpec extends AnyWordSpec, Matchers:
       )
     }
 
+    "remove from a bounded gauge what was set one series at a time, whatever the order of its labels" in {
+      val testkit  = MetricsTestkit()
+      val byOrigin = Gauge("processor_origin_entries", "Entries by zone and provider").labelled[(zone: Provider, provider: Provider)]
+      val gauge    = Eval.run(testkit.metrics[Eval].register(byOrigin))
+
+      Eval.run(gauge.set((zone = Provider("eu"), provider = Provider("cns")), 1))
+      Eval.run(gauge.set((zone = Provider("us"), provider = Provider("lsports")), 2))
+      Eval.run(gauge.replace(Map((zone = Provider("us"), provider = Provider("lsports")) -> 7)))
+
+      (testkit.labelValues(byOrigin), testkit.value(byOrigin, (zone = Provider("us"), provider = Provider("lsports")))) shouldBe (
+        Set(List("us", "lsports")),
+        Some(7.0),
+      )
+    }
+
     "refuse a name registered twice, and a name taken by a metric of another type" in {
       val metrics = MetricsTestkit().metrics[Eval]
       val _       = Eval.run(metrics.register(received))
@@ -121,6 +136,28 @@ final class PrometheusBackendSpec extends AnyWordSpec, Matchers:
         Map("""processor_build_info{outcome="ok",provider="lsports"}""" -> 1.0),
         Set(List("lsports", "ok")),
       )
+    }
+
+    "read back what an info metric says, and nothing before it is set" in {
+      val testkit = MetricsTestkit()
+      val build   = Eval.run(testkit.metrics[Eval].register(release))
+      val before  = testkit.info(release)
+
+      Eval.run(build.set((provider = Provider("cns"), outcome = Outcome.Ok)))
+
+      (before, testkit.info(release)) shouldBe (None, Some(Map("provider" -> "cns", "outcome" -> "ok")))
+    }
+
+    "expose a ratio gauge with its unit" in {
+      val testkit = MetricsTestkit()
+      val usage   = Gauge.ratio("cache_usage_ratio", "Used part of the cache")
+      val gauge   = Eval.run(testkit.metrics[Eval].register(usage))
+
+      Eval.run(gauge.set(0.25))
+
+      val snapshot = testkit.registry.scrape().stream().iterator().asScala.find(_.getMetadata.getName == "cache_usage_ratio")
+
+      (testkit.value(usage), snapshot.map(_.getMetadata.getUnit), testkit.series.get("cache_usage_ratio")) shouldBe (Some(0.25), Some(PrometheusUnit.RATIO), Some(0.25))
     }
 
     "drop a family from the scrape once it is unregistered" in {
@@ -210,10 +247,30 @@ final class PrometheusBackendSpec extends AnyWordSpec, Matchers:
         finally taken.close()
 
       val named = refused.left.toOption.collect { case error: ExporterException =>
-        (error.port, error.getMessage.startsWith(s"The Prometheus exporter cannot listen on port $port: "), error.getCause.isInstanceOf[BindException])
+        (error.host, error.port, error.getMessage.startsWith(s"The Prometheus exporter cannot listen on port $port: "), error.getCause.isInstanceOf[BindException])
       }
 
-      named shouldBe Some((port, true, true))
+      named shouldBe Some((None, port, true, true))
+    }
+
+    "listen only on the interface it is given, and name it when it cannot" in {
+      val testkit = MetricsTestkit()
+      val client  = HttpClient.newHttpClient()
+      val _       = Eval.run(testkit.metrics[Eval].register(received))
+
+      def scrape(host: String, port: Int): Try[Int] =
+        Try(client.send(HttpRequest.newBuilder(URI.create(s"http://$host:$port/metrics")).build(), HttpResponse.BodyHandlers.ofString()).statusCode())
+
+      val served =
+        Eval.run(PrometheusExporter.allocated[Eval]("127.0.0.1", 0, testkit.registry).use(exporter => summon[Effect[Eval]].delay(scrape("127.0.0.1", exporter.port))))
+
+      val refused = Eval.attempt(PrometheusExporter.allocated[Eval]("192.0.2.1", 0, testkit.registry).use(_ => summon[Effect[Eval]].unit))
+
+      val named = refused.left.toOption.collect { case error: ExporterException =>
+        (error.host, error.getMessage.startsWith("The Prometheus exporter cannot listen on 192.0.2.1:0: "))
+      }
+
+      (served, named) shouldBe (Try(200), Some((Some("192.0.2.1"), true)))
     }
   }
 

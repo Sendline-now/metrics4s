@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
-import cats.effect.{IO, Ref}
+import cats.effect.{Deferred, IO, Ref}
 import cats.effect.testing.scalatest.AsyncIOSpec
 
 import metrics4s.*
@@ -35,6 +35,39 @@ final class CatsMetricsSpec extends AsyncWordSpec, AsyncIOSpec, Matchers:
         _       <- time.timed(IO.never[Unit]).timeoutTo(30.millis, IO.unit)
         recorded = testkit.histogram(processTime)
       yield (recorded.map(_.count), recorded.exists(_.sum >= 0.03)) shouldBe (Some(2L), true)
+    }
+  }
+
+  "tracking an IO in a gauge" should {
+    "count it while it runs, and let go of it when it ends, fails or is canceled" in {
+      val testkit       = MetricsTestkit()
+      val inFlight      = Gauge("processor_in_flight", "Items being processed")
+      given Metrics[IO] = testkit.metrics[IO]
+
+      for
+        running <- Metrics[IO].register(inFlight)
+        entered <- Deferred[IO, Unit]
+        during  <- running.track(IO(testkit.value(inFlight)))
+        _       <- running.track(IO.raiseError[Unit](IllegalStateException("boom"))).attempt
+        stuck   <- running.track(entered.complete(()) *> IO.never[Unit]).start
+        _       <- entered.get
+        held     = testkit.value(inFlight)
+        _       <- stuck.cancel
+      yield (during, held, testkit.value(inFlight)) shouldBe (Some(1.0), Some(1.0), Some(0.0))
+    }
+
+    "keep the time of the last run that ended, and nothing of one that was canceled" in {
+      val testkit       = MetricsTestkit()
+      val lastRun       = Gauge.seconds("processor_last_run_seconds", "How long the last run took")
+      given Metrics[IO] = testkit.metrics[IO]
+
+      for
+        gauge <- Metrics[IO].register(lastRun)
+        _     <- gauge.timed(IO.sleep(30.millis))
+        first  = testkit.value(lastRun)
+        _     <- gauge.timed(IO.never[Unit]).timeoutTo(60.millis, IO.unit)
+        second = testkit.value(lastRun)
+      yield (first.exists(_ >= 0.03), first.exists(_ < 0.06), second) shouldBe (true, true, first)
     }
   }
 

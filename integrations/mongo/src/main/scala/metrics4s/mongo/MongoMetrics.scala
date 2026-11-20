@@ -1,5 +1,6 @@
 package metrics4s.mongo
 
+import java.util.HashMap
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 
 import scala.concurrent.duration.{FiniteDuration, NANOSECONDS}
@@ -11,20 +12,23 @@ import org.bson.BsonDocument
 import metrics4s.*
 
 enum Command derives LabelValue:
-  case Find, Insert, Update, Delete, Aggregate, Count, Distinct, GetMore, FindAndModify, CreateIndexes, Other
+  case Find, Insert, Update, Delete, Aggregate, Count, Distinct, GetMore, FindAndModify, BulkWrite, CreateIndexes, CommitTransaction, AbortTransaction, Other
 
 object Command:
   private val byName: Map[String, Command] = Map(
-    "find"          -> Find,
-    "insert"        -> Insert,
-    "update"        -> Update,
-    "delete"        -> Delete,
-    "aggregate"     -> Aggregate,
-    "count"         -> Count,
-    "distinct"      -> Distinct,
-    "getMore"       -> GetMore,
-    "findAndModify" -> FindAndModify,
-    "createIndexes" -> CreateIndexes,
+    "find"              -> Find,
+    "insert"            -> Insert,
+    "update"            -> Update,
+    "delete"            -> Delete,
+    "aggregate"         -> Aggregate,
+    "count"             -> Count,
+    "distinct"          -> Distinct,
+    "getMore"           -> GetMore,
+    "findAndModify"     -> FindAndModify,
+    "bulkWrite"         -> BulkWrite,
+    "createIndexes"     -> CreateIndexes,
+    "commitTransaction" -> CommitTransaction,
+    "abortTransaction"  -> AbortTransaction,
   )
 
   def of(name: String): Command = byName.getOrElse(name, Other)
@@ -49,7 +53,8 @@ enum ConnectionState derives LabelValue:
   case Open, CheckedOut
 
 final class MongoMetrics private (val collections: List[Collection]):
-  private val known = collections.toSet
+  private val known = HashMap[String, Collection]()
+  collections.foreach(collection => known.put(collection.name, collection): Unit)
 
   private given LabelValue[Collection] = LabelValue.enumerated(collections :+ Collection.Other)(_.name)
 
@@ -66,7 +71,7 @@ final class MongoMetrics private (val collections: List[Collection]):
 
   val definitions: List[MetricDef] = List(commands, failures, connections, checkOut, checkOutFailures)
 
-  def collection(name: Option[String]): Collection = name.map(Collection(_)).filter(known).getOrElse(Collection.Other)
+  def collection(name: Option[String]): Collection = name.fold(Collection.Other)(known.getOrDefault(_, Collection.Other))
 
   def register[F[*]](using metrics: Metrics[F], F: Effect[F]): F[MongoListeners] =
     F.map(metrics.registerAll((commands, failures, connections, checkOut, checkOutFailures))) { (commands, failures, connections, checkOut, checkOutFailures) =>
@@ -83,7 +88,9 @@ object MongoMetrics:
       .withoutPreCreation
 
   val failures: CounterDef[Long, (command: Command, collection: Collection)] =
-    Counter("mongo_command_failures", "Commands the server or the driver failed").labelled[(command: Command, collection: Collection)].withoutPreCreation
+    Counter("mongo_command_failures", "Commands the server or the driver failed")
+      .labelled[(command: Command, collection: Collection)]
+      .withPreCreation(PreCreation.WithinLimit)
 
   val connections: GaugeDef[Double, (state: ConnectionState)] =
     Gauge("mongo_pool_connections", "Connections of the pools, open and checked out").labelled[(state: ConnectionState)]

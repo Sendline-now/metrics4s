@@ -70,19 +70,70 @@ final class MetricsSpec extends AnyWordSpec, Matchers:
     }
 
     "refuse a domain larger than the pre-creation limit" in withMetrics(MetricsConfig.default.withPreCreateLimit(5)) { (metrics, backend) =>
+      val refused = failure(metrics.register(bySource))
+
       (
-        failure(metrics.register(bySource)),
+        refused,
+        refused.map(_.message),
         backend.isRegistered("processor_source_items"),
         Eval.attempt(metrics.register(bySource.withoutPreCreation)).isRight
       ) shouldBe (
-        Some(MetricError.DomainTooLarge(bySource.name, 6, 5)),
+        Some(MetricError.DomainTooLarge(bySource.name, List("outcome" -> 3, "source" -> 2), 1, 6, 5)),
+        Some(
+          "processor_source_items: 3 outcome x 2 source = 6 series, more than the 5 a metric creates up front; " +
+            "raise MetricsConfig.preCreateLimit, or define it withoutPreCreation, or withPreCreation(PreCreation.WithinLimit)"
+        ),
         false,
         true,
       )
     }
 
+    "count the limit in series, so a histogram spends its buckets, sum and count on every combination" in withMetrics(
+      MetricsConfig.default.withPreCreateLimit(20)
+    ) { (metrics, backend) =>
+      val narrow = Histogram.seconds("processor_step_seconds", "One step", Buckets(0.1, 1)).labelled[Outcome]
+      val wide   = Histogram.seconds("processor_stage_seconds", "One stage", Buckets(0.1, 1, 10, 60)).labelled[Outcome]
+
+      val fits    = Eval.attempt(metrics.register(narrow)).isRight
+      val refused = failure(metrics.register(wide))
+
+      (fits, backend.observed("processor_step_seconds", "ok"), refused, refused.map(_.message.takeWhile(_ != ','))) shouldBe (
+        true,
+        Some(Vector.empty),
+        Some(MetricError.DomainTooLarge(wide.name, List("outcome" -> 3), 7, 21, 20)),
+        Some("processor_stage_seconds: 3 outcome x 7 series each = 21 series"),
+      )
+    }
+
+    "create a domain within the limit up front and a larger one on first use, when asked for what fits" in withMetrics(
+      MetricsConfig.default.withPreCreateLimit(5)
+    ) { (metrics, backend) =>
+      val small  = Eval.run(metrics.register(processed.withPreCreation(PreCreation.WithinLimit)))
+      val large  = Eval.run(metrics.register(bySource.withPreCreation(PreCreation.WithinLimit)))
+      val before = (backend.series("processor_items").size, backend.series("processor_source_items").size)
+
+      Eval.run(small.inc(Outcome.Ok))
+      Eval.run(large.inc(ByOutcome(Outcome.Error, Source.Rabbit)))
+
+      (before, backend.series("processor_items")(List("ok")), backend.series("processor_source_items")) shouldBe (
+        (3, 0),
+        1.0,
+        Map(List("error", "rabbit") -> 1.0),
+      )
+    }
+
+    "keep the way its series are created through new labels" in {
+      (
+        processed.preCreation,
+        processed.withoutPreCreation.labelled[ByOutcome].preCreation,
+        processTime.withPreCreation(PreCreation.WithinLimit).labelled[Outcome].preCreation,
+        Info("processor_build", "The build").preCreation,
+      ) shouldBe (PreCreation.Always, PreCreation.Never, PreCreation.WithinLimit, PreCreation.Never)
+    }
+
     "refuse a reserved or repeated label name and two values rendered the same" in withMetrics() { (metrics, _) =>
-      final case class ByBucket(le: Outcome) derives Labels
+      final case class ByBucket(bucket: Outcome)
+      given Labels[ByBucket]    = Labels.fromFields(List("le"), List(summon[LabelValue[Outcome]].asInstanceOf[LabelValue[Any]]), (labels, _) => labels.bucket)
       final case class Twice(outcome: Outcome, source: Source)
       given Labels[Twice]       = Labels.fromFields(
         List("outcome", "outcome"),
@@ -123,6 +174,13 @@ final class MetricsSpec extends AnyWordSpec, Matchers:
         Some(Vector(2.0)),
         Map(Nil -> 7.0),
       )
+    }
+
+    "not compile with anything but definitions" in withMetrics() { (metrics, _) =>
+      (
+        typeCheckErrors("""metrics.registerAll((processed, "processor_items"))""").nonEmpty,
+        typeCheckErrors("""metrics.registerAll((processed, cacheSize))""").isEmpty,
+      ) shouldBe (true, true)
     }
 
     "unregister the ones already registered when a later one fails" in withMetrics() { (metrics, backend) =>
@@ -237,14 +295,87 @@ final class MetricsSpec extends AnyWordSpec, Matchers:
       backend.series("processor_provider_entries") shouldBe Map(List("lsports") -> 5.0)
     }
 
-    "record bytes and seconds in the base unit" in withMetrics() { (metrics, backend) =>
+    "remove from a bounded domain what was set one series at a time as well, and everything when nothing is left" in withMetrics() { (metrics, backend) =>
+      val byProvider = Eval.run(metrics.register(providers))
+
+      Eval.run(byProvider.set(Provider("cns"), 1))
+      Eval.run(byProvider.add(Provider("betradar"), 4))
+      Eval.run(byProvider.replace(Map(Provider("lsports") -> 5)))
+
+      val recalculated = backend.series("processor_provider_entries")
+
+      Eval.run(byProvider.replace(Map.empty))
+
+      (recalculated, backend.series("processor_provider_entries")) shouldBe (Map(List("lsports") -> 5.0), Map.empty)
+    }
+
+    "record bytes and seconds in the base unit, and a ratio as it is" in withMetrics() { (metrics, backend) =>
       val size  = Eval.run(metrics.register(Gauge.bytes("cache_size_bytes", "Cache size")))
       val delay = Eval.run(metrics.register(Gauge.seconds("probe_delay_seconds", "Probe delay")))
+      val usage = Eval.run(metrics.register(Gauge.ratio("cache_usage_ratio", "Used part of the cache")))
 
       Eval.run(size.set(2048L))
       Eval.run(delay.set(1500.micros))
+      Eval.run(usage.set(0.75))
 
-      (backend.series("cache_size_bytes"), backend.series("probe_delay_seconds")) shouldBe (Map(Nil -> 2048.0), Map(Nil -> 0.0015))
+      (backend.series("cache_size_bytes"), backend.series("probe_delay_seconds"), backend.series("cache_usage_ratio")) shouldBe (
+        Map(Nil -> 2048.0),
+        Map(Nil -> 0.0015),
+        Map(Nil -> 0.75),
+      )
+    }
+
+    "count what is running: one more while an effect runs, one less once it ends, a failure included" in withMetrics() { (metrics, backend) =>
+      val running = Eval.run(metrics.register(inFlight))
+      val total   = Eval.run(metrics.register(cacheSize))
+      val boom    = IllegalStateException("boom")
+      val effect  = summon[Effect[Eval]]
+
+      def now(labels: String*): Double = backend.series(if labels.isEmpty then "processor_cache_entries" else "processor_in_flight")(labels.toList)
+
+      val during = Eval.run(running.track(Outcome.Ok)(effect.delay(now("ok"))))
+      val nested = Eval.run(total.track(total.track(effect.delay(now()))))
+      val failed = Eval.attempt(running.track(Outcome.Error)(effect.raiseError[Int](boom)))
+
+      (during, nested, failed, backend.series("processor_in_flight"), now()) shouldBe (
+        1.0,
+        2.0,
+        Left(boom),
+        Map(List("ok") -> 0.0, List("skipped") -> 0.0, List("error") -> 0.0),
+        0.0,
+      )
+    }
+
+    "keep how long the last run of an effect took, whether it succeeded or failed" in withMetrics() { (metrics, backend) =>
+      val seeding = Eval.run(metrics.register(Gauge.seconds("processor_seed_seconds", "Seeding at start")))
+      val byEnd   = Eval.run(metrics.register(Gauge.seconds("processor_sync_seconds", "The last synchronisation").labelled[Outcome]))
+      val boom    = IllegalStateException("boom")
+      val effect  = summon[Effect[Eval]]
+
+      val before = backend.series("processor_seed_seconds")
+      val seeded = Eval.run(seeding.timed(effect.delay { Thread.sleep(20); 7 }))
+      val failed = Eval.attempt(byEnd.timed(Outcome.Error)(effect.delay { Thread.sleep(20); throw boom }))
+
+      (
+        before,
+        seeded,
+        failed,
+        backend.series("processor_seed_seconds")(Nil) >= 0.02,
+        backend.series("processor_sync_seconds")(List("error")) >= 0.02,
+        backend.series("processor_sync_seconds")(List("ok")),
+      ) shouldBe (Map(Nil -> 0.0), 7, Left(boom), true, true, 0.0)
+    }
+
+    "move without an effect and without labels on its unsafe side" in withMetrics() { (metrics, backend) =>
+      val entries = Eval.run(metrics.register(cacheSize)).unsafe
+
+      entries.set(10)
+      entries.add(-3)
+      entries.inc()
+      entries.inc()
+      entries.dec()
+
+      backend.series("processor_cache_entries") shouldBe Map(Nil -> 8.0)
     }
   }
 

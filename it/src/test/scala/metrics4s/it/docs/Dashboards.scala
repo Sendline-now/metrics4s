@@ -26,7 +26,7 @@ object Dashboards:
     Stats(
       Stat.rate(HttpServerMetrics.requests),
       Stat.quantile(HttpServerMetrics.duration, 0.95),
-      Stat.share(HttpServerMetrics.requests)(_.status.in(StatusClass.ServerError, StatusClass.Failed)),
+      Stat.share(HttpServerMetrics.requests)(_.status === StatusClass.ServerError),
     )
 
     dashboard.missingSeries(List(ProcessorMetrics.processed, ProcessorMetrics.processTime) ++ HttpServerMetrics.definitions)

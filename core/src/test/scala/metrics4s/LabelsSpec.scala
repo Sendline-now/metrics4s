@@ -48,6 +48,36 @@ final class LabelsSpec extends AnyWordSpec, Matchers:
         "Error is not one of the values this label was given",
       )
     }
+
+    "index the cases of an enum by their ordinal and anything else by its place in the list, refusing what the list leaves out either way" in {
+      enum Level(val value: String):
+        case Debug extends Level("DEBUG")
+        case Info  extends Level("INFO")
+        case Error extends Level("ERROR")
+
+      enum Other:
+        case First, Second
+
+      val all     = LabelValue.enumerated(Level.values)(_.value)
+      val leading = LabelValue.enumerated(List(Level.Debug, Level.Info))(_.value)
+      val picked  = LabelValue.enumerated(List(Level.Error, Level.Debug))(_.value)
+      val mixed   = LabelValue.enumerated[Any](List[Any](Level.Debug, Other.Second))(_.toString)
+      val named   = LabelValue.enumerated(List("b", "a", "c"))(identity)
+
+      (
+        Level.values.toList.map(all.index),
+        intercept[NoSuchElementException](leading.index(Level.Error)).getMessage,
+        (picked.index(Level.Error), picked.index(Level.Debug), intercept[NoSuchElementException](picked.index(Level.Info)).getMessage),
+        (mixed.index(Level.Debug), mixed.index(Other.Second), intercept[NoSuchElementException](mixed.index(Other.First)).getMessage),
+        (named.index("a"), named.index("c"), intercept[NoSuchElementException](named.index("d")).getMessage),
+      ) shouldBe (
+        List(0, 1, 2),
+        "Error is not one of the values this label was given",
+        (0, 1, "Info is not one of the values this label was given"),
+        (0, 1, "First is not one of the values this label was given"),
+        (1, 2, "d is not one of the values this label was given"),
+      )
+    }
   }
 
   "derived labels" should {
@@ -97,6 +127,24 @@ final class LabelsSpec extends AnyWordSpec, Matchers:
       typeCheckErrors("""
         final case class ByPath(path: String) derives Labels
       """).nonEmpty shouldBe true
+    }
+  }
+
+  "the names of derived labels" should {
+    "not compile when a field is named as the exposition format names its own labels, nor when two fields come to the same name" in {
+      (
+        typeCheckErrors("""{ final case class ByBucket(le: Outcome) derives Labels }""").map(_.message),
+        typeCheckErrors("""summon[Labels[(quantile: Outcome)]]""").map(_.message),
+        typeCheckErrors("""summon[Labels[(__name: Outcome)]]""").map(_.message),
+        typeCheckErrors("""summon[Labels[(sourceQueue: Outcome, source_queue: Source)]]""").map(_.message),
+        summon[Labels[(sourceQueue: Outcome, source: Source)]].names.toList,
+      ) shouldBe (
+        List("Invalid label name \"le\": it is written by the exposition format itself"),
+        List("Invalid label name \"quantile\": it is written by the exposition format itself"),
+        List("Invalid label name \"__name\": it must not start with __, which Prometheus reserves for itself"),
+        List("Invalid label name \"source_queue\": two fields are both named so in snake case"),
+        List("source_queue", "source"),
+      )
     }
   }
 

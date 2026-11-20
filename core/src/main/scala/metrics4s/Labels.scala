@@ -2,7 +2,7 @@ package metrics4s
 
 import scala.NamedTuple.NamedTuple
 import scala.annotation.publicInBinary
-import scala.compiletime.{constValueTuple, summonAll}
+import scala.compiletime.summonAll
 import scala.deriving.Mirror
 
 import metrics4s.internal.{Checked, Naming}
@@ -59,13 +59,13 @@ object Labels:
 
   inline def derived[L](using mirror: Mirror.ProductOf[L]): Labels[L] =
     fromProduct[L](
-      constValueTuple[mirror.MirroredElemLabels].toList.map(_.toString),
+      Checked.labelNames[mirror.MirroredElemLabels],
       summonAll[Tuple.Map[mirror.MirroredElemTypes, LabelValue]].toList.map(_.asInstanceOf[LabelValue[Any]]),
     )
 
   inline given namedTuple: [N <: Tuple, V <: Tuple] => Labels[NamedTuple[N, V]] =
     fromProduct[NamedTuple[N, V]](
-      constValueTuple[N].toList.map(_.toString),
+      Checked.labelNames[N],
       summonAll[Tuple.Map[V, LabelValue]].toList.map(_.asInstanceOf[LabelValue[Any]]),
     )
 

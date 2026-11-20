@@ -1,9 +1,10 @@
 package metrics4s
 
-import java.util.NoSuchElementException
+import java.util.{HashMap, NoSuchElementException}
 
 import scala.annotation.publicInBinary
-import scala.compiletime.{constValueTuple, erasedValue, error, summonFrom}
+import scala.compiletime.{asMatchable, constValueTuple, erasedValue, error, summonFrom}
+import scala.reflect.Enum
 import scala.deriving.Mirror
 
 import metrics4s.internal.Naming
@@ -32,13 +33,9 @@ object LabelValue:
     fromCaseNames[A](constValueTuple[mirror.MirroredElemLabels].toList.map(_.toString), mirror.ordinal)
 
   def enumerated[A](values: Iterable[A])(render: A => String): Enumerated[A] =
-    val all       = values.toVector
-    val positions = all.zipWithIndex.toMap
+    val all = values.toVector
 
-    Enumerated(
-      IArray.from(all.map(render)),
-      value => positions.getOrElse(value, throw NoSuchElementException(s"$value is not one of the values this label was given")),
-    )
+    Enumerated(IArray.from(all.map(render)), if inOrdinalOrder(all) then byOrdinal(all) else byPosition(all))
 
   def bounded[A](render: A => String): Bounded[A] = Bounded(render)
 
@@ -46,6 +43,34 @@ object LabelValue:
 
   @publicInBinary private[metrics4s] def fromCaseNames[A](names: List[String], ordinal: A => Int): Enumerated[A] =
     Enumerated(IArray.from(names.map(Naming.snakeCase)), ordinal)
+
+  private def inOrdinalOrder[A](all: Vector[A]): Boolean =
+    all.zipWithIndex.forall { (value, position) =>
+      value.asMatchable match
+        case cased: Enum => cased.ordinal == position
+        case _           => false
+    }
+
+  private def byOrdinal[A](all: Vector[A]): A => Int =
+    val cases = all.toArray[Any]
+
+    value =>
+      value.asMatchable match
+        case cased: Enum if cased.ordinal < cases.length && cases(cased.ordinal) == value => cased.ordinal
+        case _                                                                            => outside(value)
+
+  private def byPosition[A](all: Vector[A]): A => Int =
+    val positions = HashMap[A, Integer](all.size * 2)
+    all.zipWithIndex.foreach((value, position) => positions.put(value, position): Unit)
+
+    value =>
+      val position = positions.get(value)
+
+      if position eq null
+      then outside(value)
+      else position
+
+  private def outside(value: Any): Nothing = throw NoSuchElementException(s"$value is not one of the values this label was given")
 
   private inline def requireSingletons[T <: Tuple]: Unit =
     inline erasedValue[T] match

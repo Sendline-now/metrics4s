@@ -10,7 +10,7 @@ import com.mongodb.connection.{ClusterId, ConnectionDescription, ConnectionId, S
 import com.mongodb.event.*
 import org.bson.{BsonDocument, BsonInt32, BsonString}
 
-import metrics4s.{Eval, MetricDef, Metrics}
+import metrics4s.{Eval, MetricDef, Metrics, MetricsConfig}
 import metrics4s.grafana.{Dashboard, Row, Rows, ServiceFilter}
 import metrics4s.testkit.MetricsTestkit
 
@@ -51,7 +51,52 @@ final class MongoMetricsSpec extends AnyWordSpec, Matchers:
         testkit.value(defs.failures, (command = Command.Insert, collection = Collection.Other)),
         testkit.histogram(defs.commands, (command = Command.GetMore, collection = Collection("users"))).map(_.count),
         testkit.value(defs.failures, (command = Command.Find, collection = Collection("users"))),
-      ) shouldBe (Some(1L), Some(0.03), Some(1L), Some(1.0), Some(1L), None)
+      ) shouldBe (Some(1L), Some(0.03), Some(1L), Some(1.0), Some(1L), Some(0.0))
+    }
+
+    "show every failure counter at zero from the start, so the first failure is a rise and not a new series" in {
+      val testkit         = MetricsTestkit()
+      given Metrics[Eval] = testkit.metrics[Eval]
+      val defs            = MongoMetrics(List("users", "orders"))
+      val _               = Eval.run(defs.register[Eval])
+
+      (
+        testkit.labelValues(defs.failures).size,
+        testkit.labelValues(defs.failures).map(_.last),
+        testkit.labelValues(defs.commands),
+      ) shouldBe (Command.values.length * 3, Set("users", "orders", "other"), Set.empty)
+    }
+
+    "create the failure counters on first use where the collections are too many to create them all" in {
+      val testkit         = MetricsTestkit()
+      given Metrics[Eval] = testkit.metrics[Eval](MetricsConfig.default.withPreCreateLimit(20))
+      val defs            = MongoMetrics(List("users", "orders"))
+      val listeners       = Eval.run(defs.register[Eval])
+      val before          = testkit.labelValues(defs.failures)
+
+      listeners.command.commandStarted(CommandStartedEvent(null, 1, 10, description, "app", "find", command("find", "orders")))
+      listeners.command.commandFailed(CommandFailedEvent(null, 1, 10, description, "app", "find", nanos(5), IllegalStateException("cursor not found")))
+
+      (before, testkit.labelValues(defs.failures)) shouldBe (Set.empty, Set(List("find", "orders")))
+    }
+
+    "name the commands of a transaction and of a bulk write, which belong to no collection" in {
+      val testkit         = MetricsTestkit()
+      given Metrics[Eval] = testkit.metrics[Eval]
+      val defs            = MongoMetrics(List("users"))
+      val listeners       = Eval.run(defs.register[Eval])
+
+      List("commitTransaction", "abortTransaction", "bulkWrite", "listIndexes").zipWithIndex.foreach { (name, index) =>
+        listeners.command.commandStarted(CommandStartedEvent(null, index, 10, description, "admin", name, BsonDocument(name, BsonInt32(1))))
+        listeners.command.commandSucceeded(CommandSucceededEvent(null, index, 10, description, "admin", name, BsonDocument("ok", BsonInt32(1)), nanos(1)))
+      }
+
+      testkit.labelValues(defs.commands) shouldBe Set(
+        List("commit_transaction", "other"),
+        List("abort_transaction", "other"),
+        List("bulk_write", "other"),
+        List("other", "other"),
+      )
     }
 
     "follow the pool: connections open and checked out, check-out time and failures by reason" in {
@@ -81,7 +126,7 @@ final class MongoMetricsSpec extends AnyWordSpec, Matchers:
         Some(2L),
         Some(1.0),
         Some(0.0),
-        Set("mongo_command_seconds_count", "mongo_command_seconds_bucket", "mongo_command_failures_total")
+        Set("mongo_command_seconds_count", "mongo_command_seconds_bucket")
       )
     }
   }
@@ -89,7 +134,7 @@ final class MongoMetricsSpec extends AnyWordSpec, Matchers:
   "the MongoDB definitions" should {
     "describe the same series without the collections as with them, and serve every series the shared row reads" in {
       def shape(definition: MetricDef) =
-        (definition.name.value, definition.help, definition.kind, definition.unit, definition.labelNames.toList, definition.preCreated)
+        (definition.name.value, definition.help, definition.kind, definition.unit, definition.labelNames.toList, definition.preCreation)
 
       (
         MongoMetrics.definitions.map(shape),

@@ -12,9 +12,10 @@ import metrics4s.runtime.cats.CatsInstances.given
 
 object Backend:
   def wired(registry: PrometheusRegistry): IO[Unit] =
-    given Metrics[IO] = PrometheusMetrics[IO](registry) // or PrometheusMetrics[IO](registry, MetricsConfig.default.withPreCreateLimit(1024))
+    given Metrics[IO] = PrometheusMetrics[IO](registry) // or PrometheusMetrics[IO](registry, MetricsConfig.default.withPreCreateLimit(50000))
     PrometheusMetrics.jvm[IO](registry) // the client's own JVM metrics: jvm_memory_used_bytes, process_cpu_seconds_total, ...
     PrometheusExporter.allocated[IO](9090, registry).toResource // HTTPServer; port 0 picks a free one, exporter.port says which
+    PrometheusExporter.allocated[IO]("127.0.0.1", 9464, registry).toResource // only on the interface it is given
     PrometheusScrape.text(registry) // the exposition, for a /metrics route of your own
 
     CatsRuntimeMetrics.resource[IO]().use_

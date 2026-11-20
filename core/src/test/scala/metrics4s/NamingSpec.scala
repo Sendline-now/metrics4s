@@ -62,12 +62,25 @@ final class NamingSpec extends AnyWordSpec, Matchers:
         errorsOf(typeCheckErrors("""Histogram.sizes("batch_seconds", "Batch", Buckets.Sizes)""")),
         errorsOf(typeCheckErrors("""Histogram.seconds("processor_process_time", "Processing", Buckets.Normal)""")),
         errorsOf(typeCheckErrors("""Counter.bytes("sent", "Sent")""")),
+        errorsOf(typeCheckErrors("""Gauge("cache_usage_ratio", "Used part of the cache")""")),
+        errorsOf(typeCheckErrors("""Gauge.ratio("cache_usage", "Used part of the cache")""")),
       ) shouldBe (
         List("Invalid metric name \"cache_size_bytes\": it must not end with _bytes: use Gauge.bytes, which records the unit"),
         List("Invalid metric name \"batch_seconds\": it must not end with _seconds: use Histogram.seconds, which records the unit"),
         List("Invalid metric name \"processor_process_time\": it must end with _seconds"),
         List("Invalid metric name \"sent\": it must end with _bytes"),
+        List("Invalid metric name \"cache_usage_ratio\": it must not end with _ratio: use Gauge.ratio, which records the unit"),
+        List("Invalid metric name \"cache_usage\": it must end with _ratio"),
       )
+    }
+
+    "keep a ratio for gauges: a histogram may be named after one, there being no constructor that records it" in {
+      val gauge = Gauge.ratio("cache_usage_ratio", "Used part of the cache")
+
+      (
+        (gauge.name.value, gauge.kind, gauge.unit),
+        Histogram.sizes("codec_compression_ratio", "Compressed size over the original", Buckets.Sizes).unit,
+      ) shouldBe (("cache_usage_ratio", MetricKind.Gauge, Some(MetricUnit.Ratio)), None)
     }
 
     "not compile with an info metric named _info or carrying a unit" in {

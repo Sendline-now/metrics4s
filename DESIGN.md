@@ -237,8 +237,9 @@ rendered value per label and, when every label is enumerated, an index into thei
   enum that already carries its string says so with `LabelValue.enumerated(Level.values)(_.value)`. Derivation never
   looks for a `value` field on its own, so what a derived instance renders depends only on the case names.
 * **`derives Labels`** works for case classes, and a named tuple gets its `Labels` with no derivation at all. Label
-  names are the field names in snake case. The domain is the product of the fields' domains when they are all
-  enumerated.
+  names are the field names in snake case, and a macro checks them where the labels are derived: `le`, `quantile`, a
+  leading `__` and two fields that come to the same name are compile errors, like a bad metric name. The domain is
+  the product of the fields' domains when they are all enumerated.
 * **A single label** needs its name, `Labels.single("outcome")`. The name is checked at compile time, so `le` and
   `quantile` are refused. A label name is never guessed from a type name.
 
@@ -251,11 +252,10 @@ and the integrations normalise every incoming value into it before it reaches th
 forever, so `LabelValue[String]` does not exist. Normalising an outside value into an enum is the job of a small total
 function written next to the code that receives it.
 
-Registration checks what the types cannot express:
+Registration checks what the compiler cannot see:
 
-* label names are valid and not reserved;
-* no label is declared twice;
-* no two values of an enumerated label render the same string.
+* no two values of an enumerated label render the same string, which depends on values known only at run time;
+* the label names of a `Labels` built by hand, which no macro saw.
 
 ## Series exist from the start
 
@@ -264,14 +264,27 @@ needs a second sample on top of that. The services worked around it by calling `
 in `create`. `metrics4s` does that at registration: when every label of a metric is enumerated, every combination is
 created at zero, and a metric without labels is created at zero too.
 
-The product of enumerated domains can get large: 20 routes × 6 status classes is 120 series of zeros per pod.
-Registration refuses a product over `MetricsConfig.preCreateLimit` (default 512) with `MetricError.DomainTooLarge`. A
+The product of enumerated domains can get large, and what it costs Prometheus is series, not combinations: a
+counter spends one on each combination, a histogram spends its buckets, `+Inf`, `_sum` and `_count`. So
+`MetricsConfig.preCreateLimit` counts series, 10 000 for one metric by default. Registration refuses a metric over it
+with `MetricError.DomainTooLarge`, whose message is the sum (`700 route x 15 series each = 10500 series`), and a
 definition that really wants that many says `.withoutPreCreation`. Refusing, rather than quietly skipping
 pre-creation, is deliberate: a cardinality blow-up shows up when the service starts, not as empty panels after a
 release.
 
-The MongoDB command histogram is the one built-in definition that opts out. Commands × collections × buckets would be
-thousands of zeros, so its panels fill as the commands run.
+The limit first counted combinations and was 512. The Sendline backend passed it on the day its 87th endpoint was
+added: 88 routes × 6 status classes, 528 one-line series, and the backend did not start. A limit that a counter
+reaches at 88 routes while a histogram of the same routes spends three times as many series below it was measuring
+the wrong thing.
+
+**`PreCreation.WithinLimit` is for a domain that grows with the service.** A list of collections or tenants is not a
+bug when it gets long, and a definition in a library cannot know how long it will get. Such a definition creates its
+series at zero while they fit and on first use when they do not, and never fails the start.
+
+`metrics4s-mongo` uses both ways out. Its failure counter is `WithinLimit`: a failure counter that appears with its
+first failure hides that failure from `rate()`, so it should exist at zero wherever it can. Its command histogram is
+never pre-created: commands × collections × buckets would be thousands of zeros, so its panels fill as the commands
+run.
 
 ## The hot path does not look labels up
 
@@ -281,13 +294,10 @@ array indexed by the combination's position in the product (mixed radix over the
 then an array read and an `inc`, with no allocation for a single enum. A bounded label renders its value and does the
 client's lookup.
 
-[BENCHMARKS.md](BENCHMARKS.md) has the numbers, on an M4 Max:
-
-- one enumerated label: 196 updates per microsecond against the raw client's 152;
-- two enumerated labels: 155 against 137;
-- one bounded label: 94.
-
-The bounded path first measured 52. Passing the label array to the client without a copy fixed most of that.
+[BENCHMARKS.md](BENCHMARKS.md) has the numbers. An enumerated label is faster than the raw client, whether it is an
+enum, a case class of enums or a named tuple; a bounded label and a label listed at startup pay for a lookup. The
+bounded path first measured about half of what it does now. Passing the label array to the client without a copy
+fixed most of that.
 
 Every instrument has `unsafe`, the same operations returning `Unit`, for code outside `F`: a driver listener, an HTTP
 client interceptor, a Java callback. The integrations use it.
@@ -411,6 +421,21 @@ A success and an error are recorded. A cancellation is not, because its duration
 not the time the work takes. `timedBy` picks the labels from the outcome, which lets errors share a histogram with
 successes under `outcome="error"`. The effect is taken by name, so nothing in it runs before the clock is read.
 
+A gauge of seconds has `timed` as well, for what runs once or rarely: a seeding at start, a nightly synchronisation.
+It keeps how long the last run took, and a cancelled run leaves the previous value for the same reason.
+
+## Counting what is running
+
+```scala
+inFlight.track(labels)(fa)
+inFlight.track(fa)
+```
+
+One more while `fa` runs, one less once it ends, fails or is cancelled. Written by hand it is an `inc`, the effect and
+a `dec` in a finalizer, and the finalizer is what gets forgotten: `0.2.0`'s own tapir integration lost the `dec` of
+every cancelled request. `track` is a bracket in the runtime's own terms, so the decrement is where the runtime runs
+its finalizers.
+
 ## Measuring an operation
 
 ```scala
@@ -439,6 +464,9 @@ dashboard with its old number. `gauge.set(labels, value)` keeps per-series seman
 full recalculation: every series missing from the map is reset to zero when the domain is enumerated (it was
 pre-created, so it stays) and removed when the domain is bounded.
 
+What is missing is read from the backend, through `Series.labelValues`, and not remembered by the gauge. A gauge that
+remembered only what its own `replace` had set, as it did until `1.0.0`, kept every series that a `set` had made.
+
 ## The Prometheus backend
 
 `metrics4s-prometheus` is the only module that knows the Java client.
@@ -447,6 +475,7 @@ pre-created, so it stays) and removed when the domain is bounded.
 given Metrics[IO] = PrometheusMetrics[IO](registry)
 PrometheusMetrics.jvm[IO](registry)
 PrometheusExporter.allocated[IO](9090, registry)
+PrometheusExporter.allocated[IO]("127.0.0.1", 9464, registry)
 PrometheusScrape.text(registry)
 ```
 
@@ -469,7 +498,7 @@ working. A spec in each runtime module compares the exported families with the l
 | cats-effect | Compute pool (threads, active, searching, blocked), fibers queued and suspended, per-worker counters, timers, CPU starvation count, clock drift histogram sampled by a fiber of its own | 3.7.1: a timer that fires on its own thread is counted twice in `_executed`, and `_canceled` lags |
 | ZIO | Default and blocking executors (workers, concurrency, queue, enqueued, dequeued), fibers by state and by outcome through a `Supervisor` | Only fibers started after the supervisor is added are counted |
 | Kyo | One batch callback over `Scheduler.status()`: workers, load, admission, regulators, per-worker counters | `status()` takes a stack trace per busy worker, so it is read once per scrape; regulator averages are `NaN` until the first measurement and are left out; `kyo-kernel` declares JMH as a compile dependency, which is excluded |
-| rapid | Nothing | rapid 2.9.9 has a `TaskMonitor` trait but no hook to install one |
+| rapid | Nothing | rapid 2.9.10 has a `TaskMonitor` trait but no hook to install one |
 
 The cats-effect clock drift fiber is the one runtime metric that needs scheduling. It is therefore the one that is a
 `Resource` of the runtime rather than a callback.
@@ -549,13 +578,20 @@ All HTTP integrations share `metrics4s-http`, so one dashboard row fits whicheve
 
 | Metric | Labels |
 | --- | --- |
-| `http_server_requests_total`, `http_server_request_seconds`, `http_server_in_flight` | `route` (a template from a closed set, or `unmatched`), `status` (`1xx` to `5xx`) |
-| `http_client_requests_total`, `http_client_request_seconds`, `http_client_in_flight` | `operation` (from a closed set, or `other`), `status` (`1xx` to `5xx`, or `failed` when no response came back) |
+| `http_server_requests_total`, `http_server_request_seconds`, `http_server_in_flight` | `route` (a template from a closed set, or `unmatched`), `status` (`StatusClass`: `1xx` to `5xx`) |
+| `http_client_requests_total`, `http_client_request_seconds`, `http_client_in_flight` | `operation` (from a closed set, or `other`), `status` (`ClientStatus`: `1xx` to `5xx`, or `failed` when no response came back) |
 
 * **The route includes the method** (`GET /events/{id}`), so there is no separate `method` label. With one, routes ×
   methods × statuses would have to be pre-created.
 * **`status` is a class, not a code.** That keeps the domain small enough to pre-create. A service that needs 404 apart
   from 400 has the route to tell them apart.
+* **A server and a client have different statuses.** A server always answers, and an exception in a handler is its
+  `5xx`, so `failed` is not a value its metric can take. Until `1.0.0` one enum served both, every route carried a
+  `failed` series that stayed at zero, and the Sendline dashboard added it to its server errors, where it added
+  nothing. Two types make the dashboard's filter say what the metric can.
+* **A cancelled request is counted nowhere.** A caller that hung up, or a call cut by a timeout, got no answer, and
+  the time it took is the time until somebody gave up. It leaves the in-flight gauge and nothing else. Every
+  integration has a test that cancels a request and reads the gauge back at zero.
 * **The definitions live on the companions as well.** `HttpServerMetrics.requests` is defined with a bounded route,
   and an instance relabels it with its enumerated routes, so both describe the same series. A dashboard needs the
   names, not the values, and draws from the companion without the route list. `MongoMetrics` does the same with its
@@ -563,13 +599,16 @@ All HTTP integrations share `metrics4s-http`, so one dashboard row fits whicheve
 * **http4s** gets server middleware with a classifier from the request to a template, and client middleware with a
   classifier into operations.
 * **tapir** takes the templates from the endpoints themselves (`TapirMetrics.template`). A request no endpoint matched
-  is `unmatched`.
-* **sttp client 4** goes through its own `ListenerBackend`.
+  is `unmatched`. It is a `MetricsRequestInterceptor` of its own rather than a `Metric` for tapir's: tapir calls none
+  of a metric's callbacks when a request is cancelled, so the interceptor wraps the handling in the server monad's
+  `ensure` and lets go of the request there.
+* **sttp client 4** goes through its own `ListenerBackend`, for all six kinds of backend. sttp reports a cancellation
+  to a listener as an `InterruptedException`, which is where a cancelled call is dropped.
 * **MongoDB** gets a `CommandListener` and a `ConnectionPoolListener` for the driver. They report:
   - command time and failures by `command` (an enum of the common ones, then `other`) and `collection` (from a
     closed set, then `other`);
   - pool connections open and checked out, check-out time, and check-out failures by reason.
-  `mongo4s` takes them through `MongoClientResource.fromSettings`. The integration test runs them against MongoDB 8.2
+  `mongo4s` takes them through `MongoClientResource.fromSettings`. The integration test runs them against MongoDB 9.0
   through `mongo4s`.
 
 Our rabbit and kafka clients are not OSS, and an OSS library cannot depend on them. Their metrics belong in those
@@ -597,7 +636,7 @@ Most of it is copied from `mongo4s`:
 inline constructor that reaches them made the compiler synthesise an unstable accessor, which is exactly what
 `-WunstableInlineAccessors` exists to refuse.
 
-**The `it` module compiles on the next Scala** (`3.10.0`) against the library built on the LTS. That is how
+**The `it` module compiles on the next Scala** (`3.10.1`) against the library built on the LTS. That is how
 `mongo4s` caught an `ArrowAssoc` deprecation that broke its users. It holds:
 
 - the Docker integration tests (Prometheus, Grafana, MongoDB through Testcontainers);
@@ -638,9 +677,19 @@ honest, and here it found two flaws the original copies still have.
 
 Nothing is open.
 
+Decided on 2026-11-16, for `1.0.0`:
+
+* **The pre-creation limit counts series** and is 10 000 for one metric; a domain over it fails registration unless
+  the definition is `WithinLimit` or `Never`.
+* **A server's status has no `failed`,** and a client's is its own type.
+* **A cancelled request or call is counted nowhere** by any integration.
+* **Label names are checked by the compiler** wherever a macro sees them.
+* **`1.0.0` is released from one adopter,** not from commons and two services as first planned: the breaks above were
+  cheaper to make before anyone else depended on `0.2.0`.
+
 Decided on 2026-11-07:
 
-* **rapid runtime metrics** are left out of `0.1.0`. rapid 2.9.9 has no hook to install a `TaskMonitor`, so the
+* **rapid runtime metrics** are left out of `0.1.0`. rapid 2.9.9 had no hook to install a `TaskMonitor`, so the
   hook is to be proposed upstream, and until then a rapid service has the JVM metrics. The item is on the
   [roadmap](ROADMAP.md#wanted-not-yet-scheduled).
 * **Coordinates:** the artifacts are published as `now.sendline` on Maven Central, and the repository is

@@ -4,7 +4,7 @@ object Dependencies {
 
   object Versions {
     val scala3     = "3.9.0"
-    val scala3Next = "3.10.0"
+    val scala3Next = "3.10.1"
 
     val prometheus = "1.10.0"
 
@@ -15,18 +15,18 @@ object Dependencies {
 
     val kyo = "1.0.0-RC7"
 
-    val rapid = "2.9.9"
+    val rapid = "2.9.10"
 
     val scalatest = "3.2.20"
 
     val testcontainers = "2.0.5"
     val ujson          = "4.4.3"
 
-    val http4s  = "0.23.38"
+    val http4s  = "0.23.39"
     val tapir   = "1.14.1"
-    val sttp    = "4.1.1"
-    val mongo   = "5.14.0"
-    val mongo4s = "5.1.1"
+    val sttp    = "4.1.3"
+    val mongo   = "5.15.0"
+    val mongo4s = "6.0.0"
   }
 
   object Http4s {

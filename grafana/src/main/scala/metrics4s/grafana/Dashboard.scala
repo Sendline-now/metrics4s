@@ -36,7 +36,7 @@ final class Dashboard private (
 
   def writeTo(directory: Path): Either[Throwable, Path] =
     for
-      content <- render.left.map(error => IllegalArgumentException(error.message))
+      content <- render.left.map(_.toThrowable)
       file    <- Try(Files.writeString(Files.createDirectories(directory).resolve(s"$uid.json"), content, StandardCharsets.UTF_8)).toEither
     yield file
 

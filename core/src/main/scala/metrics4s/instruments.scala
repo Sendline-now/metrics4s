@@ -34,6 +34,14 @@ trait GaugeOf[F[*], V, L]:
   def unsafe: GaugeOf.Unsafe[V, L]
   def unregister: F[Unit]
 
+  def track[A](labels: L)(fa: => F[A])(using one: Double =:= V): F[A]
+
+  def timed[A](labels: L)(fa: => F[A])(using seconds: FiniteDuration =:= V): F[A]
+
+  final def track[A](fa: => F[A])(using labels: NoLabels =:= L, one: Double =:= V): F[A] = track(labels(NoLabels))(fa)
+
+  final def timed[A](fa: => F[A])(using labels: NoLabels =:= L, seconds: FiniteDuration =:= V): F[A] = timed(labels(NoLabels))(fa)
+
   final def set(value: V)(using labels: NoLabels =:= L): F[Unit] = set(labels(NoLabels), value)
 
   final def add(delta: V)(using labels: NoLabels =:= L): F[Unit] = add(labels(NoLabels), delta)
@@ -53,9 +61,15 @@ object GaugeOf:
 
     final def set(value: V)(using labels: NoLabels =:= L): Unit = set(labels(NoLabels), value)
 
+    final def add(delta: V)(using labels: NoLabels =:= L): Unit = add(labels(NoLabels), delta)
+
     final def inc(labels: L)(using one: Double =:= V): Unit = add(labels, one(1.0))
 
     final def dec(labels: L)(using one: Double =:= V): Unit = add(labels, one(-1.0))
+
+    final def inc()(using labels: NoLabels =:= L, one: Double =:= V): Unit = add(labels(NoLabels), one(1.0))
+
+    final def dec()(using labels: NoLabels =:= L, one: Double =:= V): Unit = add(labels(NoLabels), one(-1.0))
 
 trait HistogramOf[F[*], V, L]:
   def definition: HistogramDef[V, L]

@@ -21,7 +21,7 @@ import metrics4s.runtime.cats.CatsInstances.given
 final case class User(id: String, name: String) derives WireCodec
 
 final class MongoItSpec extends AnyWordSpec, Matchers, BeforeAndAfterAll:
-  private val container = MongoDBContainer("mongo:8.2")
+  private val container = MongoDBContainer("mongo:9.0")
 
   given RsBridgeConfig = RsBridgeConfig.default
 

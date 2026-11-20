@@ -6,4 +6,4 @@ final class MetricsConfig private (val preCreateLimit: Int):
   override def toString: String = s"MetricsConfig(preCreateLimit = $preCreateLimit)"
 
 object MetricsConfig:
-  val default: MetricsConfig = MetricsConfig(512)
+  val default: MetricsConfig = MetricsConfig(10000)

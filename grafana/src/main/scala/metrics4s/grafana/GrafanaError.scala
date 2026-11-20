@@ -9,6 +9,7 @@ enum GrafanaError:
   case UnknownLabelValue(panel: String, label: String, value: String)
   case InvalidQuantile(panel: String, quantile: Double)
   case InvalidThresholds(panel: String, values: List[Double])
+  case MissingMarkers(begin: String, end: String)
 
   def message: String =
     this match
@@ -20,3 +21,8 @@ enum GrafanaError:
       case UnknownLabelValue(panel, label, value) => s"$panel: $value is not a value of label \"$label\""
       case InvalidQuantile(panel, quantile)       => s"$panel: a quantile is between 0 and 1, not $quantile"
       case InvalidThresholds(panel, values)       => s"$panel: threshold values must be finite and increasing, not ${values.mkString(", ")}"
+      case MissingMarkers(begin, end)             => s"the document has no $begin ... $end block for the table, in that order"
+
+  def toThrowable: GrafanaException = GrafanaException(this)
+
+final class GrafanaException(val error: GrafanaError) extends RuntimeException(error.message)

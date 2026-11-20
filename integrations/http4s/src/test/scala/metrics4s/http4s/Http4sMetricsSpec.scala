@@ -3,7 +3,7 @@ package metrics4s.http4s
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
-import cats.effect.{IO, Resource}
+import cats.effect.{Deferred, IO, Resource}
 import cats.effect.testing.scalatest.AsyncIOSpec
 import org.http4s.{HttpRoutes, Method, Request, Response, Status, Uri}
 import org.http4s.client.Client
@@ -74,6 +74,37 @@ final class Http4sMetricsSpec extends AsyncWordSpec, AsyncIOSpec, Matchers:
           Set.empty,
         )
     }
+
+    "leave nothing in flight and count nothing when a request is canceled before it is answered" in {
+      val testkit       = MetricsTestkit()
+      given Metrics[IO] = testkit.metrics[IO]
+      val defs          = HttpServerMetrics(templates)
+
+      for
+        entered    <- Deferred[IO, Unit]
+        middleware <- Http4sServerMetrics[IO](templates)(classify)
+        app         = middleware(HttpRoutes.of[IO] { case GET -> Root / "events" / _ => entered.complete(()) *> IO.never }).orNotFound
+        request    <- app.run(Request[IO](Method.GET, Uri.unsafeFromString("/events/1"))).start
+        _          <- entered.get
+        during      = testkit.value(defs.inFlight)
+        _          <- request.cancel
+      yield (during, testkit.value(defs.inFlight), testkit.histogram(defs.duration, (route = Route("GET /events/{id}"))).map(_.count)) shouldBe (
+        Some(1.0),
+        Some(0.0),
+        Some(0L),
+      )
+    }
+
+    "fail a request it cannot classify without leaving it in flight" in {
+      val testkit       = MetricsTestkit()
+      given Metrics[IO] = testkit.metrics[IO]
+      val defs          = HttpServerMetrics(templates)
+
+      for
+        middleware <- Http4sServerMetrics[IO](templates)(_ => throw IllegalStateException("no template"))
+        refused    <- middleware(routes).orNotFound.run(Request[IO](Method.GET, Uri.unsafeFromString("/events/1"))).attempt
+      yield (refused.left.map(_.getMessage), testkit.value(defs.inFlight)) shouldBe (Left("no template"), Some(0.0))
+    }
   }
 
   "the http4s client middleware" should {
@@ -95,12 +126,37 @@ final class Http4sMetricsSpec extends AsyncWordSpec, AsyncIOSpec, Matchers:
         _        <- client.status(Request[IO](Method.GET, Uri.unsafeFromString("/nowhere")))
         refused  <- failing.status(Request[IO](Method.GET, Uri.unsafeFromString("/events/2"))).attempt
       yield (
-        testkit.value(defs.requests, (operation = Operation("get-event"), status = StatusClass.Success)),
-        testkit.value(defs.requests, (operation = Operation.Other, status = StatusClass.ClientError)),
-        testkit.value(defs.requests, (operation = Operation("get-event"), status = StatusClass.Failed)),
+        testkit.value(defs.requests, (operation = Operation("get-event"), status = ClientStatus.Success)),
+        testkit.value(defs.requests, (operation = Operation.Other, status = ClientStatus.ClientError)),
+        testkit.value(defs.requests, (operation = Operation("get-event"), status = ClientStatus.Failed)),
         refused.isLeft,
         testkit.value(defs.inFlight),
         testkit.missingSeries(Dashboard("api", "Line / api", "line", ServiceFilter.regex("api"))(Rows.httpClient)),
       ) shouldBe (Some(1.0), Some(1.0), Some(1.0), true, Some(0.0), Set.empty)
+    }
+
+    "leave nothing in flight and count nothing when a call is canceled, as a timeout cancels it" in {
+      val testkit       = MetricsTestkit()
+      given Metrics[IO] = testkit.metrics[IO]
+      val defs          = HttpClientMetrics(List("get-event"))
+
+      for
+        entered  <- Deferred[IO, Unit]
+        recorder <- defs.register[IO]
+        hanging   = Client[IO](_ => Resource.eval(entered.complete(()) *> IO.never[Response[IO]]))
+        client    = Http4sClientMetrics.wrap(hanging, recorder)(_ => Some("get-event"))
+        call     <- client.status(Request[IO](Method.GET, Uri.unsafeFromString("/events/1"))).start
+        _        <- entered.get
+        during    = testkit.value(defs.inFlight)
+        _        <- call.cancel
+      yield (
+        during,
+        testkit.value(defs.inFlight),
+        ClientStatus.values.toList.flatMap(status => testkit.value(defs.requests, (operation = Operation("get-event"), status = status))).sum
+      ) shouldBe (
+        Some(1.0),
+        Some(0.0),
+        0.0,
+      )
     }
   }

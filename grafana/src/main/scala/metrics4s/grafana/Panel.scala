@@ -156,12 +156,13 @@ object Panel:
     unit match
       case Some(MetricUnit.Seconds) => "percentunit"
       case Some(MetricUnit.Bytes)   => "Bps"
-      case None                     => "ops"
+      case _                        => "ops"
 
   private[grafana] def valueUnit(unit: Option[MetricUnit]): String =
     unit match
       case Some(MetricUnit.Seconds) => "s"
       case Some(MetricUnit.Bytes)   => "bytes"
+      case Some(MetricUnit.Ratio)   => "percentunit"
       case None                     => "short"
 
 sealed abstract class Stat:

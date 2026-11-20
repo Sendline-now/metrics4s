@@ -10,6 +10,7 @@ object Checked:
   inline def gauge(inline name: String): MetricName        = ${ Macros.metricName('name, "gauge", "") }
   inline def gaugeSeconds(inline name: String): MetricName = ${ Macros.metricName('name, "gauge", "seconds") }
   inline def gaugeBytes(inline name: String): MetricName   = ${ Macros.metricName('name, "gauge", "bytes") }
+  inline def gaugeRatio(inline name: String): MetricName   = ${ Macros.metricName('name, "gauge", "ratio") }
 
   inline def histogramSizes(inline name: String): MetricName   = ${ Macros.metricName('name, "histogram", "") }
   inline def histogramSeconds(inline name: String): MetricName = ${ Macros.metricName('name, "histogram", "seconds") }
@@ -20,3 +21,5 @@ object Checked:
   inline def help(inline help: String): String = ${ Macros.help('help) }
 
   inline def labelName(inline name: String): String = ${ Macros.labelName('name) }
+
+  inline def labelNames[N <: Tuple]: List[String] = ${ Macros.labelNames[N] }

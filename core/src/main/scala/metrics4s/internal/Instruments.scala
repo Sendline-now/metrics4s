@@ -17,8 +17,6 @@ private[metrics4s] final class CounterImpl[F[*], V, L](val definition: CounterDe
 
 private[metrics4s] final class GaugeImpl[F[*], V, L](val definition: GaugeDef[V, L], cells: Cells[GaugeCell, L])(using F: Effect[F]) extends GaugeOf[F, V, L]:
 
-  private var replaced: Set[Seq[String]] = Set.empty
-
   private[metrics4s] def series: Series[GaugeCell] = cells.series
 
   val unsafe: GaugeOf.Unsafe[V, L] = new GaugeOf.Unsafe[V, L]:
@@ -33,6 +31,17 @@ private[metrics4s] final class GaugeImpl[F[*], V, L](val definition: GaugeDef[V,
 
   def unregister: F[Unit] = F.delay(cells.series.unregister())
 
+  def track[A](labels: L)(fa: => F[A])(using one: Double =:= V): F[A] =
+    F.bracket(add(labels, one(1.0)))(_ => fa)(_ => add(labels, one(-1.0)))
+
+  def timed[A](labels: L)(fa: => F[A])(using seconds: FiniteDuration =:= V): F[A] =
+    F.flatMap(F.monotonic) { start =>
+      F.guaranteeCase(F.suspend(fa)) {
+        case ExitCase.Canceled => F.unit
+        case _                 => F.flatMap(F.monotonic)(end => set(labels, seconds(end - start)))
+      }
+    }
+
   private def replaceNow(values: Map[L, V]): Unit =
     cells match
       case precreated: Cells.Precreated[GaugeCell, L] =>
@@ -41,8 +50,7 @@ private[metrics4s] final class GaugeImpl[F[*], V, L](val definition: GaugeDef[V,
       case lookup: Cells.Lookup[GaugeCell, L]         =>
         val present: Map[Seq[String], Double] = values.map((labels, value) => lookup.labels.render(labels).toSeq -> definition.recorded.toDouble(value))
         present.foreach((labelValues, value) => lookup.series.cell(IArray.from(labelValues)).set(value))
-        (replaced -- present.keySet).foreach(gone => lookup.series.remove(IArray.from(gone)))
-        replaced = present.keySet
+        lookup.series.labelValues.filterNot(labelValues => present.contains(labelValues.toSeq)).foreach(lookup.series.remove)
 
 private[metrics4s] final class HistogramImpl[F[*], V, L](val definition: HistogramDef[V, L], cells: Cells[HistogramCell, L])(using F: Effect[F])
     extends HistogramOf[F, V, L]:

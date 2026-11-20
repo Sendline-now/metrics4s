@@ -91,7 +91,7 @@ through the instruments' `unsafe` side, so they need no effect. Add a dashboard 
 - Specs check real values read from a real registry, not only that a series exists.
 - `grafana` compares a rendered dashboard with `grafana/src/test/resources/processor.json` byte for byte. A deliberate
   change to rendering means rewriting that file; the failing spec shows the new JSON.
-- `it/` needs Docker: `prom/prometheus:v3.5.0`, `grafana/grafana:12.0.0` and `mongo:8.2`. It imports a generated
+- `it/` needs Docker: `prom/prometheus:v3.16.0`, `grafana/grafana:13.3.1` and `mongo:9.0`. It imports a generated
   dashboard into Grafana and runs every panel's queries through Grafana's datasource proxy. On Windows the forks point
   Testcontainers at `tcp://localhost:2375`, so enable Docker Desktop's "Expose daemon on tcp://localhost:2375 without
   TLS", or set `DOCKER_HOST` yourself.
